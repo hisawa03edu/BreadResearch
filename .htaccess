@@ -1,0 +1,9 @@
+Options -Indexes
+<FilesMatch "^(config\.php|schema\.sql|README\.md|analyze\.py)$">
+  Require all denied
+</FilesMatch>
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "SAMEORIGIN"
+  Header always set Referrer-Policy "same-origin"
+</IfModule>
