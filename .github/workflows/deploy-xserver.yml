@@ -50,10 +50,18 @@ jobs:
 
           if [ -z "$TARGET" ] || [ "$TARGET" = "/" ]; then
             echo "::error::XSERVER_PATH is empty or '/'. Deployment to the server root is blocked for safety."
-            echo "Remote SSH home and possible application locations:"
+            echo "Searching the Xserver account for BreadResearch-specific files..."
             ssh -i ~/.ssh/id_ed25519 -p "$PORT" \
               "${XSERVER_USER}@${XSERVER_HOST}" \
-              'echo "HOME=$HOME"; echo "PWD=$(pwd)"; echo "--- index.php candidates under HOME ---"; find "$HOME" -maxdepth 5 -type f -name index.php 2>/dev/null | head -50 || true'
+              'echo "HOME=$HOME"; \
+               echo "--- BreadResearch candidates: python/analyze.py ---"; \
+               find "$HOME" -type f -path "*/python/analyze.py" 2>/dev/null | sed "s#/python/analyze.py$##" | head -30 || true; \
+               echo "--- BreadResearch candidates: parameter_manual.php ---"; \
+               find "$HOME" -type f -name parameter_manual.php 2>/dev/null | sed "s#/parameter_manual.php$##" | head -30 || true; \
+               echo "--- BreadResearch candidates: migration_v6_to_v7.sql ---"; \
+               find "$HOME" -type f -name migration_v6_to_v7.sql 2>/dev/null | sed "s#/migration_v6_to_v7.sql$##" | head -30 || true; \
+               echo "--- Directories containing both api.php and index.php ---"; \
+               find "$HOME" -type f -name api.php 2>/dev/null | while read f; do d=$(dirname "$f"); [ -f "$d/index.php" ] && echo "$d"; done | head -50 || true'
             exit 2
           fi
 
