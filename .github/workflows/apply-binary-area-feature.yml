@@ -31,6 +31,12 @@ jobs:
           python3 "$SCRIPT"
           rm -rf .feature-patches
 
+          # GitHub App tokens used by Actions cannot push workflow-file changes
+          # without the workflows permission. Keep deployment workflow changes
+          # out of this feature-branch commit; they will be applied separately
+          # on main after the production DB migration is complete.
+          git restore --source=origin/main -- .github/workflows/deploy-xserver.yml
+
       - name: Static checks
         shell: bash
         run: |
@@ -44,7 +50,8 @@ jobs:
           grep -Fq 'binary_white_area_mm2' python/analyze.py
           grep -Fq 'binary_black_area_mm2' api.php
           grep -Fq 'binary_white_percent' assets/app.js
-          grep -Fq 'migration_v10_5_5_to_v10_6.sql' .github/workflows/deploy-xserver.yml
+          test -f migration_v10_5_5_to_v10_6.sql
+          grep -Fq 'binary_white_area_mm2' migration_v10_5_5_to_v10_6.sql
           grep -Fq 'Version 10.6.0' README.md
 
       - name: Commit feature implementation
