@@ -1,0 +1,73 @@
+name: Deploy to Xserver
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-xserver
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare SSH key
+        shell: bash
+        env:
+          XSERVER_SSH_KEY: ${{ secrets.XSERVER_SSH_KEY }}
+          XSERVER_HOST: ${{ secrets.XSERVER_HOST }}
+          XSERVER_PORT: ${{ secrets.XSERVER_PORT }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$XSERVER_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          PORT="${XSERVER_PORT:-10022}"
+          ssh-keyscan -p "$PORT" -H "$XSERVER_HOST" >> ~/.ssh/known_hosts
+
+      - name: Deploy application files
+        shell: bash
+        env:
+          XSERVER_HOST: ${{ secrets.XSERVER_HOST }}
+          XSERVER_USER: ${{ secrets.XSERVER_USER }}
+          XSERVER_PORT: ${{ secrets.XSERVER_PORT }}
+          XSERVER_PATH: ${{ secrets.XSERVER_PATH }}
+        run: |
+          set -euo pipefail
+          PORT="${XSERVER_PORT:-10022}"
+
+          rsync -azv \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='config.php' \
+            --exclude='uploads/' \
+            --exclude='logs/' \
+            --exclude='*.log' \
+            -e "ssh -i ~/.ssh/id_ed25519 -p $PORT" \
+            ./ "${XSERVER_USER}@${XSERVER_HOST}:${XSERVER_PATH%/}/"
+
+      - name: Verify deployed version
+        shell: bash
+        env:
+          XSERVER_HOST: ${{ secrets.XSERVER_HOST }}
+          XSERVER_USER: ${{ secrets.XSERVER_USER }}
+          XSERVER_PORT: ${{ secrets.XSERVER_PORT }}
+          XSERVER_PATH: ${{ secrets.XSERVER_PATH }}
+        run: |
+          set -euo pipefail
+          PORT="${XSERVER_PORT:-10022}"
+
+          ssh -i ~/.ssh/id_ed25519 -p "$PORT" \
+            "${XSERVER_USER}@${XSERVER_HOST}" \
+            "cd '${XSERVER_PATH%/}' && test -f index.php && test -f api.php && test -f python/analyze.py && echo 'Deploy verification OK'"
