@@ -18,7 +18,7 @@ import cv2
 import numpy as np
 
 
-ALGORITHM_VERSION = "10.5.0-python"
+ALGORITHM_VERSION = "10.6.0-python"
 
 
 def as_bool(parameters, key, default=False):
@@ -290,6 +290,31 @@ def analyze(input_path, output_dir, intermediate_dir, prefix, parameters, measur
         analysis_domain = cv2.erode(analysis_domain, erosion_kernel)
     morphology = cv2.bitwise_and(morphology, analysis_domain)
 
+    # Version 10.6: quantify the raw binarized image itself, separately from
+    # contour filtering / Watershed. White pixels are pore candidates and
+    # black pixels are crumb surface. Only the measurement mask is counted,
+    # so the background outside a manually corrected bread contour is ignored.
+    binary_measurement = cv2.bitwise_and(binary, measurement_mask)
+    binary_domain_pixels = int(cv2.countNonZero(measurement_mask))
+    binary_white_pixels = int(cv2.countNonZero(binary_measurement))
+    binary_black_pixels = max(0, binary_domain_pixels - binary_white_pixels)
+    binary_white_area_mm2 = binary_white_pixels * pixel_area_to_mm2
+    binary_black_area_mm2 = binary_black_pixels * pixel_area_to_mm2
+    binary_white_percent = (
+        float(binary_white_pixels) / float(binary_domain_pixels) * 100.0
+        if binary_domain_pixels else 0.0
+    )
+    binary_black_percent = (
+        float(binary_black_pixels) / float(binary_domain_pixels) * 100.0
+        if binary_domain_pixels else 0.0
+    )
+    # Gray indicates pixels outside the measurement range. This makes the
+    # intermediate image visually match the pixels used for the area totals.
+    binary_area_view = np.full_like(gray, 127, dtype=np.uint8)
+    inside_measurement = measurement_mask > 0
+    binary_area_view[inside_measurement] = 0
+    binary_area_view[inside_measurement & (binary > 0)] = 255
+
     final_mask = morphology.copy()
     distance = np.zeros_like(gray, dtype=np.float32)
     watershed_view = source.copy()
@@ -420,6 +445,10 @@ def analyze(input_path, output_dir, intermediate_dir, prefix, parameters, measur
         "hole_count": count,
         "hole_area_mm2": total_hole_area,
         "porosity_percent": (total_hole_area / bread_area_mm2 * 100.0) if bread_area_mm2 else 0.0,
+        "binary_white_area_mm2": binary_white_area_mm2,
+        "binary_black_area_mm2": binary_black_area_mm2,
+        "binary_white_percent": binary_white_percent,
+        "binary_black_percent": binary_black_percent,
         "mean_hole_area_mm2": (total_hole_area / count) if count else 0.0,
         "median_hole_area_mm2": median_area,
         "max_hole_area_mm2": max(areas) if areas else 0.0,
@@ -437,6 +466,7 @@ def analyze(input_path, output_dir, intermediate_dir, prefix, parameters, measur
             "gray": gray,
             "clahe": enhanced,
             "threshold": binary,
+            "binary_area": binary_area_view,
             "morphology": morphology,
             "measurement_mask": measurement_mask,
             "large_hole_contrast": large_hole_contrast,
