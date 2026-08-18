@@ -141,7 +141,8 @@ function validateAnalysisResult(array $analysis): void {
     $summary = $analysis['summary'] ?? null;
     $holes = $analysis['holes'] ?? null;
     if (!is_array($summary) || !is_array($holes)) throw new RuntimeException('Python解析結果のデータ形式が不正です。');
-    $keys = ['bread_area_mm2','hole_count','hole_area_mm2','porosity_percent','mean_hole_area_mm2',
+    $keys = ['bread_area_mm2','hole_count','hole_area_mm2','porosity_percent',
+        'binary_white_area_mm2','binary_black_area_mm2','binary_white_percent','binary_black_percent','mean_hole_area_mm2',
         'median_hole_area_mm2','max_hole_area_mm2','mean_eq_diameter_mm','small_hole_count',
         'medium_hole_count','large_hole_count'];
     foreach ($keys as $key) {
@@ -161,10 +162,11 @@ function insertAnalysis(PDO $pdo, array $config, array $input, ?string $original
         experiment_id,treatment_id,sample_code,replicate_no,bread_type,formulation,
         production_date,baking_date,measurement_date,operator_name,notes,original_filename,
         processed_at,dpi,parameter_json,bread_area_mm2,hole_count,hole_area_mm2,
-        porosity_percent,mean_hole_area_mm2,median_hole_area_mm2,max_hole_area_mm2,
+        porosity_percent,binary_white_area_mm2,binary_black_area_mm2,binary_white_percent,binary_black_percent,
+        mean_hole_area_mm2,median_hole_area_mm2,max_hole_area_mm2,
         mean_eq_diameter_mm,small_hole_count,medium_hole_count,large_hole_count,
         original_image_path,result_image_path,bread_mask_path,app_version,parent_sample_id,revision_no,roi_json
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
     $st = $pdo->prepare($sql);
     $st->execute([
         (int)$input['experiment_id'], (int)$input['treatment_id'], (string)$input['sample_code'],
@@ -174,7 +176,12 @@ function insertAnalysis(PDO $pdo, array $config, array $input, ?string $original
         $input['original_filename'] ?? '', $processedAt, (float)$input['dpi'],
         json_encode($input['parameters'], JSON_UNESCAPED_UNICODE),
         (float)$s['bread_area_mm2'], (int)$s['hole_count'], (float)$s['hole_area_mm2'],
-        (float)$s['porosity_percent'], (float)$s['mean_hole_area_mm2'],
+        (float)$s['porosity_percent'],
+        isset($s['binary_white_area_mm2']) ? (float)$s['binary_white_area_mm2'] : null,
+        isset($s['binary_black_area_mm2']) ? (float)$s['binary_black_area_mm2'] : null,
+        isset($s['binary_white_percent']) ? (float)$s['binary_white_percent'] : null,
+        isset($s['binary_black_percent']) ? (float)$s['binary_black_percent'] : null,
+        (float)$s['mean_hole_area_mm2'],
         (float)$s['median_hole_area_mm2'], (float)$s['max_hole_area_mm2'],
         (float)$s['mean_eq_diameter_mm'], (int)$s['small_hole_count'],
         (int)$s['medium_hole_count'], (int)$s['large_hole_count'],
@@ -537,6 +544,9 @@ try {
         $metricLabels = [
             'bread_area_mm2'=>'パン断面積(mm²)','hole_count'=>'空洞数','hole_area_mm2'=>'空洞合計面積(mm²)',
             'porosity_percent'=>'空洞率(%)','mean_hole_area_mm2'=>'平均空洞面積(mm²)',
+            'binary_white_area_mm2'=>'二値化白領域（空洞）面積(mm²)',
+            'binary_black_area_mm2'=>'二値化黒領域（生地）面積(mm²)',
+            'binary_white_percent'=>'二値化白領域率(%)','binary_black_percent'=>'二値化黒領域率(%)',
             'median_hole_area_mm2'=>'空洞面積中央値(mm²)','max_hole_area_mm2'=>'最大空洞面積(mm²)',
             'mean_eq_diameter_mm'=>'平均円相当直径(mm)','small_hole_count'=>'小空洞数',
             'medium_hole_count'=>'中空洞数','large_hole_count'=>'大空洞数'
@@ -578,6 +588,9 @@ try {
         $statement = $pdo->prepare($sql);
         $statement->execute($parameters);
         $rows = $statement->fetchAll();
+        // Metrics added in newer versions remain NULL for historical analyses.
+        // Exclude those rows instead of silently treating NULL as zero.
+        $rows = array_values(array_filter($rows, fn($row) => $row['metric_value'] !== null));
         if (!$rows) respond(['ok'=>false,'error'=>'統計処理できるデータがありません。'],422);
         $groupMap=[];
         foreach($rows as $row){
@@ -714,7 +727,7 @@ try {
         $input['summary'] = $analysis['summary'] ?? [];
         $input['holes'] = $analysis['holes'] ?? [];
         $input['parameters']['engine'] = 'Python OpenCV 4.5.5';
-        $input['parameters']['algorithm_version'] = $analysis['engine']['algorithm_version'] ?? '10.5.0-python';
+        $input['parameters']['algorithm_version'] = $analysis['engine']['algorithm_version'] ?? '10.6.0-python';
         $saved = insertAnalysis($pdo, $config, $input, $originalPath, $resultPath, $breadMaskPath);
         $intermediates = [];
         foreach (($analysis['intermediates'] ?? []) as $name => $fileName) {

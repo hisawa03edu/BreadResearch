@@ -428,6 +428,10 @@ const sampleColumns=[
  {key:'hole_count',label:'空洞数',type:'number',visible:true},
  {key:'hole_area_mm2',label:'空洞合計面積(mm²)',type:'number',visible:false},
  {key:'porosity_percent',label:'空洞率(%)',type:'number',visible:true},
+ {key:'binary_white_area_mm2',label:'二値化白領域（空洞）面積(mm²)',type:'number',visible:false},
+ {key:'binary_black_area_mm2',label:'二値化黒領域（生地）面積(mm²)',type:'number',visible:false},
+ {key:'binary_white_percent',label:'二値化白領域率(%)',type:'number',visible:false},
+ {key:'binary_black_percent',label:'二値化黒領域率(%)',type:'number',visible:false},
  {key:'mean_hole_area_mm2',label:'平均空洞面積(mm²)',type:'number',visible:true},
  {key:'median_hole_area_mm2',label:'中央値空洞面積(mm²)',type:'number',visible:false},
  {key:'max_hole_area_mm2',label:'最大空洞面積(mm²)',type:'number',visible:false},
@@ -588,16 +592,19 @@ $('analyzeSelectedSamples').onclick=async()=>{
 function metricLabel(k){
  const m={bread_area_mm2:'パン断面積(mm²)',hole_count:'空洞数',hole_area_mm2:'空洞合計面積(mm²)',
  porosity_percent:'空洞率(%)',mean_hole_area_mm2:'平均空洞面積(mm²)',
+ binary_white_area_mm2:'二値化白領域（空洞）面積(mm²)',binary_black_area_mm2:'二値化黒領域（生地）面積(mm²)',
+ binary_white_percent:'二値化白領域率(%)',binary_black_percent:'二値化黒領域率(%)',
  median_hole_area_mm2:'空洞面積中央値(mm²)',max_hole_area_mm2:'最大空洞面積(mm²)',
  mean_eq_diameter_mm:'平均円相当直径(mm)',small_hole_count:'小空洞数',
  medium_hole_count:'中空洞数',large_hole_count:'大空洞数'};
  return m[k]||k;
 }
 function formatMetricValue(key,value){
+ if(value===null||value===undefined||value==='')return '未計測';
  const number=Number(value||0);return ['hole_count','small_hole_count','medium_hole_count','large_hole_count'].includes(key)?number.toLocaleString('ja-JP',{maximumFractionDigits:0}):number.toLocaleString('ja-JP',{minimumFractionDigits:3,maximumFractionDigits:3});
 }
 function intermediateLabel(key){
- const labels={gray:'グレースケール',clahe:'CLAHE補正',threshold:'二値化',morphology:'形態処理',measurement_mask:'解析範囲マスク',large_hole_contrast:'大空洞コントラスト',large_hole_mask:'大空洞補完マスク',distance:'距離変換',watershed:'Watershed分割',final_mask:'最終気泡マスク'};return labels[key]||key;
+ const labels={gray:'グレースケール',clahe:'CLAHE補正',threshold:'二値化',binary_area:'二値化面積集計（白=空洞・黒=生地・灰=範囲外）',morphology:'形態処理',measurement_mask:'解析範囲マスク',large_hole_contrast:'大空洞コントラスト',large_hole_mask:'大空洞補完マスク',distance:'距離変換',watershed:'Watershed分割',final_mask:'最終気泡マスク'};return labels[key]||key;
 }
 function applyResultZoom(figure,value){
  const viewport=figure.querySelector('.result-zoom-viewport'),stage=figure.querySelector('.result-overlay-stage');if(!viewport||!stage)return;
@@ -637,6 +644,7 @@ window.viewSavedAnalysis=async id=>{
    反復：${esc(s.replicate_no||'')}　処理日時：${esc(s.processed_at)}</p>
    ${s.latest_correction_at?`<p class="notice">手動補正版あり：${esc(s.latest_correction_at)}</p>`:''}`;
   const keys=['bread_area_mm2','hole_count','hole_area_mm2','porosity_percent',
+   'binary_white_area_mm2','binary_black_area_mm2','binary_white_percent','binary_black_percent',
    'mean_hole_area_mm2','median_hole_area_mm2','max_hole_area_mm2',
    'mean_eq_diameter_mm','small_hole_count','medium_hole_count','large_hole_count'];
   $('savedAnalysisMetrics').innerHTML=keys.map(k=>`<div class="metric"><b>${metricLabel(k)}</b><br>${formatMetricValue(k,s[k])}</div>`).join('');

@@ -11,7 +11,7 @@ if (file_exists($configFile)) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title><?= htmlspecialchars($appName, ENT_QUOTES, 'UTF-8') ?></title>
-<link rel="stylesheet" href="assets/style.css?v=10.5.5">
+<link rel="stylesheet" href="assets/style.css?v=10.6.0">
 </head>
 <body>
 <div id="loginView" class="center-card hidden">
@@ -24,7 +24,7 @@ if (file_exists($configFile)) {
 
 <div id="appView" class="hidden">
 <header>
-  <div><h1><?= htmlspecialchars($appName, ENT_QUOTES, 'UTF-8') ?></h1><small>PHP + MySQL + Python OpenCV Version 10.5.5</small></div>
+  <div><h1><?= htmlspecialchars($appName, ENT_QUOTES, 'UTF-8') ?></h1><small>PHP + MySQL + Python OpenCV Version 10.6.0</small></div>
   <button id="logoutButton">ログアウト</button>
 </header>
 
@@ -333,6 +333,10 @@ if (file_exists($configFile)) {
         <option value="bread_area_mm2">パン断面積(mm²)</option>
         <option value="hole_area_mm2">空洞合計面積(mm²)</option>
         <option value="porosity_percent">空洞率(%)</option>
+        <option value="binary_white_area_mm2">二値化白領域（空洞）面積(mm²)</option>
+        <option value="binary_black_area_mm2">二値化黒領域（生地）面積(mm²)</option>
+        <option value="binary_white_percent">二値化白領域率(%)</option>
+        <option value="binary_black_percent">二値化黒領域率(%)</option>
         <option value="hole_count">空洞数</option>
         <option value="mean_hole_area_mm2">平均空洞面積(mm²)</option>
         <option value="median_hole_area_mm2">中央値空洞面積(mm²)</option>
@@ -362,6 +366,6 @@ if (file_exists($configFile)) {
 
 <canvas id="workCanvas" class="hidden"></canvas>
 <script defer src="assets/vendor/xlsx.full.min.js"></script>
-<script defer src="assets/app.js?v=10.5.5"></script>
+<script defer src="assets/app.js?v=10.6.0"></script>
 </body>
 </html>
