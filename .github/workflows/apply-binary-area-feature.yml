@@ -1,5 +1,6 @@
 name: Apply binary area metrics feature
 
+# Temporary importer for the feature/binary-area-metrics branch.
 on:
   push:
     branches:
