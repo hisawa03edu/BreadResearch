@@ -1,0 +1,179 @@
+name: Backup Xserver source
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: backup-xserver-source
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout GitHub repository
+        uses: actions/checkout@v4
+
+      - name: Prepare and test SSH connection
+        shell: bash
+        env:
+          XSERVER_SSH_KEY: ${{ secrets.XSERVER_SSH_KEY }}
+          XSERVER_HOST: ${{ secrets.XSERVER_HOST }}
+          XSERVER_USER: ${{ secrets.XSERVER_USER }}
+          XSERVER_PORT: ${{ secrets.XSERVER_PORT }}
+        run: |
+          set -euo pipefail
+
+          for name in XSERVER_SSH_KEY XSERVER_HOST XSERVER_USER; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::${name} is empty."
+              exit 10
+            fi
+          done
+
+          PORT="${XSERVER_PORT:-10022}"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$XSERVER_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          : > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+          success=0
+          for attempt in 1 2 3; do
+            echo "SSH attempt ${attempt}/3"
+            if ssh \
+              -i ~/.ssh/id_ed25519 \
+              -p "$PORT" \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=accept-new \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              -o ConnectTimeout=20 \
+              -o ConnectionAttempts=1 \
+              "${XSERVER_USER}@${XSERVER_HOST}" \
+              'echo "SSH connection OK"; echo "HOME=$HOME"'; then
+              success=1
+              break
+            fi
+            sleep 5
+          done
+
+          if [ "$success" -ne 1 ]; then
+            echo "::error::Could not establish SSH connection after 3 attempts."
+            exit 13
+          fi
+
+      - name: Validate Xserver source path
+        shell: bash
+        env:
+          XSERVER_HOST: ${{ secrets.XSERVER_HOST }}
+          XSERVER_USER: ${{ secrets.XSERVER_USER }}
+          XSERVER_PORT: ${{ secrets.XSERVER_PORT }}
+          XSERVER_PATH: ${{ secrets.XSERVER_PATH }}
+        run: |
+          set -euo pipefail
+          PORT="${XSERVER_PORT:-10022}"
+          TARGET="${XSERVER_PATH%/}"
+
+          if [ -z "$TARGET" ] || [ "$TARGET" = "/" ]; then
+            echo "::error::XSERVER_PATH is empty or '/'."
+            exit 20
+          fi
+
+          ssh -i ~/.ssh/id_ed25519 -p "$PORT" \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "${XSERVER_USER}@${XSERVER_HOST}" \
+            "cd '$TARGET' && test -f index.php && test -f api.php && echo 'Xserver source path OK'"
+
+      - name: Copy Xserver source to runner
+        shell: bash
+        env:
+          XSERVER_HOST: ${{ secrets.XSERVER_HOST }}
+          XSERVER_USER: ${{ secrets.XSERVER_USER }}
+          XSERVER_PORT: ${{ secrets.XSERVER_PORT }}
+          XSERVER_PATH: ${{ secrets.XSERVER_PATH }}
+        run: |
+          set -euo pipefail
+          PORT="${XSERVER_PORT:-10022}"
+          TARGET="${XSERVER_PATH%/}"
+
+          mkdir -p xserver_snapshot
+
+          # Read-only pull: this command never writes to or deletes files on Xserver.
+          rsync -azv \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='config.php' \
+            --exclude='uploads/' \
+            --exclude='logs/' \
+            --exclude='*.log' \
+            -e "ssh -i ~/.ssh/id_ed25519 -p $PORT -o BatchMode=yes -o StrictHostKeyChecking=yes" \
+            "${XSERVER_USER}@${XSERVER_HOST}:${TARGET}/" ./xserver_snapshot/
+
+      - name: Build GitHub comparison snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p github_snapshot
+          rsync -a \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='config.php' \
+            --exclude='uploads/' \
+            --exclude='logs/' \
+            --exclude='*.log' \
+            --exclude='xserver_snapshot/' \
+            --exclude='github_snapshot/' \
+            ./ ./github_snapshot/
+
+      - name: Compare Xserver and GitHub
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          (
+            echo "BreadResearch source comparison"
+            echo "Generated: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            echo
+            diff -qr ./github_snapshot ./xserver_snapshot || true
+          ) | tee comparison.txt
+
+          (
+            cd xserver_snapshot
+            find . -type f -print0 | sort -z | xargs -0 sha256sum
+          ) > xserver-sha256.txt
+
+          (
+            cd github_snapshot
+            find . -type f -print0 | sort -z | xargs -0 sha256sum
+          ) > github-sha256.txt
+
+          DIFF_COUNT=$(tail -n +3 comparison.txt | sed '/^$/d' | wc -l | tr -d ' ')
+          {
+            echo "## Xserver source backup"
+            echo
+            echo "- Xserver snapshot created successfully"
+            echo "- Sensitive/runtime data excluded: config.php, uploads/, logs/, *.log"
+            echo "- Difference lines versus current GitHub: ${DIFF_COUNT}"
+            echo
+            echo "### Comparison preview"
+            echo '```text'
+            tail -n +3 comparison.txt | head -100
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Xserver source backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: breadresearch-xserver-source-${{ github.run_number }}
+          path: |
+            xserver_snapshot/
+            comparison.txt
+            xserver-sha256.txt
+            github-sha256.txt
+          if-no-files-found: error
+          retention-days: 30
