@@ -1,0 +1,58 @@
+name: Apply binary area metrics feature
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/apply-binary-area-feature.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-feature:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/binary-area-metrics
+          fetch-depth: 0
+
+      - name: Apply staged patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATCH=.feature-patches/binary-area-metrics.patch
+          test -f "$PATCH"
+          git apply --check "$PATCH"
+          git apply "$PATCH"
+          rm -f "$PATCH"
+          rmdir .feature-patches 2>/dev/null || true
+
+      - name: Static checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile python/analyze.py
+          if command -v php >/dev/null 2>&1; then
+            php -l api.php
+            php -l index.php
+            php -l config.sample.php
+          fi
+          grep -Fq 'binary_white_area_mm2' python/analyze.py
+          grep -Fq 'binary_black_area_mm2' api.php
+          grep -Fq 'migration_v10_5_5_to_v10_6.sql' .github/workflows/deploy-xserver.yml
+          grep -Fq 'Version 10.6.0' README.md
+
+      - name: Commit feature implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Add binary white and black area metrics'
+          git push origin HEAD:feature/binary-area-metrics
