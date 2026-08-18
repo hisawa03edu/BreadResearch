@@ -1,6 +1,9 @@
 name: Deploy to Xserver
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 concurrency:
@@ -74,7 +77,7 @@ jobs:
             exit 13
           fi
 
-      - name: Validate deployment path
+      - name: Validate deployment path and production prerequisites
         shell: bash
         env:
           XSERVER_HOST: ${{ secrets.XSERVER_HOST }}
@@ -88,26 +91,20 @@ jobs:
 
           if [ -z "$TARGET" ] || [ "$TARGET" = "/" ]; then
             echo "::error::XSERVER_PATH is empty or '/'. Deployment to the server root is blocked for safety."
-            echo "Searching the Xserver account for BreadResearch-specific files..."
-            ssh -i ~/.ssh/id_ed25519 -p "$PORT" \
-              -o BatchMode=yes -o StrictHostKeyChecking=yes \
-              "${XSERVER_USER}@${XSERVER_HOST}" \
-              'echo "HOME=$HOME"; \
-               echo "--- BreadResearch candidates: python/analyze.py ---"; \
-               find "$HOME" -type f -path "*/python/analyze.py" 2>/dev/null | sed "s#/python/analyze.py$##" | head -30 || true; \
-               echo "--- BreadResearch candidates: parameter_manual.php ---"; \
-               find "$HOME" -type f -name parameter_manual.php 2>/dev/null | sed "s#/parameter_manual.php$##" | head -30 || true; \
-               echo "--- BreadResearch candidates: migration_v10_4_to_v10_5.sql ---"; \
-               find "$HOME" -type f -name migration_v10_4_to_v10_5.sql 2>/dev/null | sed "s#/migration_v10_4_to_v10_5.sql$##" | head -30 || true; \
-               echo "--- Directories containing both api.php and index.php ---"; \
-               find "$HOME" -type f -name api.php 2>/dev/null | while read f; do d=$(dirname "$f"); [ -f "$d/index.php" ] && echo "$d"; done | head -50 || true'
             exit 2
           fi
 
           ssh -i ~/.ssh/id_ed25519 -p "$PORT" \
             -o BatchMode=yes -o StrictHostKeyChecking=yes \
             "${XSERVER_USER}@${XSERVER_HOST}" \
-            "if [ ! -d '$TARGET' ]; then echo '::error::XSERVER_PATH does not exist: $TARGET'; exit 3; fi; if [ ! -w '$TARGET' ]; then echo '::error::XSERVER_PATH is not writable: $TARGET'; exit 4; fi; echo 'Deployment path OK: $TARGET'"
+            "set -eu; \
+             test -d '$TARGET' || { echo 'XSERVER_PATH does not exist'; exit 3; }; \
+             test -w '$TARGET' || { echo 'XSERVER_PATH is not writable'; exit 4; }; \
+             test -f '$TARGET/config.php' || { echo 'config.php is missing'; exit 5; }; \
+             grep -Fq '10.5.5' '$TARGET/config.php' || { echo 'config.php app_version is not 10.5.5'; exit 6; }; \
+             mkdir -p '$TARGET/uploads/intermediate'; \
+             test -w '$TARGET/uploads/intermediate' || { echo 'uploads/intermediate is not writable'; exit 7; }; \
+             echo 'Production prerequisites OK'"
 
       - name: Deploy application files
         shell: bash
@@ -146,4 +143,12 @@ jobs:
           ssh -i ~/.ssh/id_ed25519 -p "$PORT" \
             -o BatchMode=yes -o StrictHostKeyChecking=yes \
             "${XSERVER_USER}@${XSERVER_HOST}" \
-            "cd '$TARGET' && test -f index.php && test -f api.php && test -f python/analyze.py && echo 'Deploy verification OK'"
+            "set -eu; \
+             cd '$TARGET'; \
+             test -f index.php; \
+             test -f api.php; \
+             test -f python/analyze.py; \
+             test -f migration_v10_4_to_v10_5.sql; \
+             grep -Fq 'Version 10.5.5' README.md; \
+             grep -Fq '10.5.5' config.php; \
+             echo 'Deploy verification OK: BreadResearch 10.5.5'"
