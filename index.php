@@ -260,6 +260,10 @@ if (file_exists($configFile)) {
       <button id="exportSamplesCsv">表示中CSV</button>
       <button id="exportSamplesXlsx">表示中Excel</button>
     </div>
+    <div class="thumbnail-toolbar">
+      <label class="inline-check"><input id="dataThumbnailToggle" type="checkbox"> サムネイルを表示（元画像・解析結果）</label>
+      <span class="small-note">OFF時は画像を読み込まないため、一覧を軽く表示できます。</span>
+    </div>
     <div class="selection-toolbar">
       <strong id="selectedSampleCount">選択データ：0件</strong>
       <button id="selectFilteredSamples">検索結果をすべて選択</button>
@@ -375,6 +379,6 @@ if (file_exists($configFile)) {
 
 <canvas id="workCanvas" class="hidden"></canvas>
 <script defer src="assets/vendor/xlsx.full.min.js"></script>
-<script defer src="assets/app.js?v=10.6.0-view3"></script>
+<script defer src="assets/app.js?v=10.6.0-view4"></script>
 </body>
 </html>
