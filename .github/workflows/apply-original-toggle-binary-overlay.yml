@@ -1,0 +1,58 @@
+name: Apply original toggle and binary overlay
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/apply-original-toggle-binary-overlay.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-feature:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/toggle-original-and-binary-overlay
+          fetch-depth: 0
+
+      - name: Apply verified patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCRIPT=.feature-patches/apply_toggle_original_binary_overlay.py
+          test -f "$SCRIPT"
+          python3 "$SCRIPT"
+          rm -rf .feature-patches
+
+      - name: Static checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile python/analyze.py
+          if command -v php >/dev/null 2>&1; then
+            php -l api.php
+            php -l index.php
+          fi
+          grep -Fq '二値化画像の濃度' assets/app.js
+          grep -Fq 'original-visibility-toggle' assets/app.js
+          grep -Fq 'savedOriginalToggle' index.php
+          grep -Fq 'savedBinaryBaseCanvas' index.php
+          grep -Fq 'savedBinaryOpacity' index.php
+          grep -Fq 'binary_area_filename' python/analyze.py
+          grep -Fq 'assets/app.js?v=10.6.0-view3' index.php
+
+      - name: Commit feature implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Default to overlay views and make original optional'
+          git push origin HEAD:feature/toggle-original-and-binary-overlay
