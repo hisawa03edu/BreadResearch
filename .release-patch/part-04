@@ -1,0 +1,100 @@
+    await diagnosePython();
+@@ -300,7 +377,8 @@
+  for(let i=0;i<files.length;i++){
+   const f=files[i];$('analysisProgressBar').style.width='2%';$('analysisProgress').textContent=`${i+1}/${files.length} ${f.name} を準備中`;
+   try{
+-   const img=await loadImage(f),p=parameters(),prepared=prepareRoiImage(img,p);
++   const img=await loadImage(f),p=parameters(),prepared=p.analysis_scope==='bread'?prepareBreadImage(img,p):prepareRoiImage(img,p);
++   if(p.analysis_scope==='bread'&&(!breadMaskPrepared||breadMaskPrepared.width!==prepared.canvas.width||breadMaskPrepared.height!==prepared.canvas.height))throw new Error('解析画像サイズが変わりました。パン輪郭を再検出してください。');
+    prepared.originalDataUrl=await prepareOriginalImageData(img,f);
+    p.scale=prepared.scale;
+    setWorkerState('解析中','working');
+@@ -308,7 +386,7 @@
+    const saved=await runPythonAnalysis({
+      experiment_id:$('analysisExperiment').value,treatment_id:$('analysisTreatment').value,
+      sample_code:f.name.replace(/\.[^.]+$/,''),original_filename:f.name,dpi:p.dpi,
+-     parameters:p,analysis_image:prepared.analysisDataUrl,
++     parameters:p,analysis_image:prepared.analysisDataUrl,bread_mask:p.analysis_scope==='bread'?breadMaskStateCanvas.toDataURL('image/png'):null,
+      original_image:prepared.originalDataUrl,roi:prepared.roi,
+      parent_sample_id:rerunMeta?rerunMeta.parent:null,revision_no:rerunMeta?rerunMeta.revision:1,
+      metadata:{replicate_no:$('replicateNo').value,bread_type:$('breadType').value,
+@@ -319,10 +397,10 @@
+    setWorkerState('利用可能','ready');
+    const resultUrl=`${saved.result_image_path}?t=${Date.now()}`;
+    const intermediateUrls={};Object.entries(saved.intermediates||{}).forEach(([k,v])=>intermediateUrls[k]=`${v}?t=${Date.now()}`);
+-   const metrics=Object.entries(saved.summary).map(([k,v])=>`<div class="metric"><b>${esc(k)}</b><br>${Number(v).toFixed(3)}</div>`).join('');
++   const metrics=Object.entries(saved.summary).map(([k,v])=>`<div class="metric"><b>${esc(metricLabel(k))}</b><br>${formatMetricValue(k,v)}</div>`).join('');
+    $('analysisResults').insertAdjacentHTML('beforeend',`<div class="card"><h2>${esc(f.name)} <small>${esc(saved.processed_at)}</small></h2>
+-    <div class="metric-grid">${metrics}</div><div class="result-grid"><img src="${prepared.originalDataUrl}"><img src="${resultUrl}"></div>
+-    ${Object.keys(intermediateUrls).length?`<details><summary>解析途中画像</summary><div class="intermediate-grid">${Object.entries(intermediateUrls).map(([k,u])=>`<figure><img src="${u}"><figcaption>${esc(k)}</figcaption></figure>`).join('')}</div></details>`:''}
++    <div class="metric-grid">${metrics}</div><div class="result-grid"><figure><img src="${prepared.originalDataUrl}" alt="元画像"><figcaption>元画像</figcaption></figure><figure class="result-comparison"><div class="result-view-controls"><label class="result-opacity-control">検出結果の濃度 <input class="result-opacity-range" type="range" min="0" max="100" value="60"><output>60%</output></label><label class="result-zoom-control">表示倍率 <input class="result-zoom-range" type="range" min="25" max="300" step="5" value="100"><output>100%</output></label></div><div class="result-zoom-viewport"><div class="result-overlay-stage" data-image-width="${prepared.width}" data-image-height="${prepared.height}" style="--result-aspect:${prepared.width}/${prepared.height}"><img class="result-base-image" src="${prepared.analysisDataUrl}" alt="解析範囲の元画像"><img class="result-overlay-image" src="${resultUrl}" alt="解析結果" style="opacity:.6"></div></div><figcaption>解析結果（拡大時は画像内をスクロールできます）</figcaption></figure></div>
++    ${Object.keys(intermediateUrls).length?`<details><summary>解析途中画像</summary><div class="intermediate-grid">${Object.entries(intermediateUrls).map(([k,u])=>`<figure><img src="${u}"><figcaption>${esc(intermediateLabel(k))}</figcaption></figure>`).join('')}</div></details>`:''}
+     <p class="notice">手動補正は「データ一覧」→「画像・結果」から開けます。</p></div>`);
+   }catch(e){
+    if(e.name==='AbortError'){
+@@ -515,6 +593,40 @@
+  medium_hole_count:'中空洞数',large_hole_count:'大空洞数'};
+  return m[k]||k;
+ }
++function formatMetricValue(key,value){
++ const number=Number(value||0);return ['hole_count','small_hole_count','medium_hole_count','large_hole_count'].includes(key)?number.toLocaleString('ja-JP',{maximumFractionDigits:0}):number.toLocaleString('ja-JP',{minimumFractionDigits:3,maximumFractionDigits:3});
++}
++function intermediateLabel(key){
++ const labels={gray:'グレースケール',clahe:'CLAHE補正',threshold:'二値化',morphology:'形態処理',measurement_mask:'解析範囲マスク',large_hole_contrast:'大空洞コントラスト',large_hole_mask:'大空洞補完マスク',distance:'距離変換',watershed:'Watershed分割',final_mask:'最終気泡マスク'};return labels[key]||key;
++}
++function applyResultZoom(figure,value){
++ const viewport=figure.querySelector('.result-zoom-viewport'),stage=figure.querySelector('.result-overlay-stage');if(!viewport||!stage)return;
++ const imageWidth=Math.max(1,Number(stage.dataset.imageWidth)||1),imageHeight=Math.max(1,Number(stage.dataset.imageHeight)||1),viewportWidth=Math.max(1,viewport.clientWidth),zoom=value/100;
++ const displayWidth=Math.max(1,Math.round(viewportWidth*zoom)),displayHeight=Math.max(1,Math.round(displayWidth*imageHeight/imageWidth));
++ stage.style.width=`${displayWidth}px`;stage.style.height=`${displayHeight}px`;stage.style.aspectRatio='auto';stage.classList.toggle('zoom-reduced',value<100);
++ requestAnimationFrame(()=>{viewport.scrollLeft=Math.max(0,(stage.offsetWidth-viewport.clientWidth)/2);viewport.scrollTop=Math.max(0,(stage.offsetHeight-viewport.clientHeight)/2);});
++}
++document.addEventListener('input',event=>{
++ const figure=event.target.closest('.result-comparison');if(!figure)return;
++ if(event.target.classList.contains('result-opacity-range')){
++  const value=Math.min(100,Math.max(0,Number(event.target.value)||0)),overlay=figure.querySelector('.result-overlay-image'),output=event.target.closest('label')?.querySelector('output');
++  if(overlay)overlay.style.opacity=String(value/100);if(output)output.textContent=`${value}%`;
++ }
++ if(event.target.classList.contains('result-zoom-range')){
++  const value=Math.min(300,Math.max(25,Number(event.target.value)||100)),output=event.target.closest('label')?.querySelector('output');
++  applyResultZoom(figure,value);if(output)output.textContent=`${value}%`;
++ }
++});
++function loadUrlImage(url){return new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(new Error('比較用画像を読み込めません。'));image.src=url;});}
++async function prepareSavedResultBase(originalUrl,resultUrl,parametersData,roiData){
++ const [original,result]=await Promise.all([loadUrlImage(originalUrl),loadUrlImage(resultUrl)]),canvas=$('savedResultBaseCanvas'),context=canvas.getContext('2d');
++ canvas.width=result.naturalWidth;canvas.height=result.naturalHeight;
++ let source={x:0,y:0,w:original.naturalWidth,h:original.naturalHeight};
++ if((parametersData.analysis_scope||'rectangle')==='rectangle'&&roiData){source={x:Number(roiData.x)||0,y:Number(roiData.y)||0,w:Number(roiData.w)||original.naturalWidth,h:Number(roiData.h)||original.naturalHeight};}
++ source.x=Math.max(0,Math.min(original.naturalWidth-1,source.x));source.y=Math.max(0,Math.min(original.naturalHeight-1,source.y));source.w=Math.max(1,Math.min(original.naturalWidth-source.x,source.w));source.h=Math.max(1,Math.min(original.naturalHeight-source.y,source.h));
++ context.clearRect(0,0,canvas.width,canvas.height);context.drawImage(original,source.x,source.y,source.w,source.h,0,0,canvas.width,canvas.height);
++ const stage=$('savedResultOverlayStage');stage.dataset.imageWidth=String(canvas.width);stage.dataset.imageHeight=String(canvas.height);stage.style.setProperty('--result-aspect',`${canvas.width}/${canvas.height}`);
++}
+ window.viewSavedAnalysis=async id=>{
+  try{
+   const s=(await api('sample',{query:`&sample_id=${id}`})).item;
+@@ -527,16 +639,18 @@
+   const keys=['bread_area_mm2','hole_count','hole_area_mm2','porosity_percent',
+    'mean_hole_area_mm2','median_hole_area_mm2','max_hole_area_mm2',
+    'mean_eq_diameter_mm','small_hole_count','medium_hole_count','large_hole_count'];
+-  $('savedAnalysisMetrics').innerHTML=keys.map(k=>`<div class="metric"><b>${metricLabel(k)}</b><br>${Number(s[k]||0).toFixed(3)}</div>`).join('');
+-  $('savedOriginalImage').src=`${s.original_image_path}?t=${Date.now()}`;
+-  $('savedResultImage').src=`${s.latest_corrected_result_path||s.result_image_path}?t=${Date.now()}`;
++  $('savedAnalysisMetrics').innerHTML=keys.map(k=>`<div class="metric"><b>${metricLabel(k)}</b><br>${formatMetricValue(k,s[k])}</div>`).join('');
++  const originalUrl=`${s.original_image_path}?t=${Date.now()}`,resultUrl=`${s.latest_corrected_result_path||s.result_image_path}?t=${Date.now()}`;
++  $('savedOriginalImage').src=originalUrl;$('savedResultImage').src=resultUrl;$('savedResultImage').style.opacity='.6';$('savedResultOpacity').value='60';$('savedResultOpacityValue').textContent='60%';$('savedResultZoom').value='100';$('savedResultZoomValue').textContent='100%';$('savedResultOverlayStage').style.width='100%';$('savedResultOverlayStage').classList.remove('zoom-reduced');
+   let p={};try{p=JSON.parse(s.parameter_json||'{}')}catch(e){}
+   let roiData=null;try{roiData=s.roi_json?JSON.parse(s.roi_json):null}catch(e){}
++  await prepareSavedResultBase(originalUrl,resultUrl,p,roiData);
+   const rows=[...Object.entries(p),['ROI',roiData?JSON.stringify(roiData):'未指定'],
++   ['パン輪郭マスク',s.bread_mask_path||'なし'],
+    ['解析バージョン',s.app_version],['改訂番号',s.revision_no]];
+   $('savedParameterTable').innerHTML='<table><tr><th>項目</th><th>保存値</th></tr>'+
+    rows.map(([k,v])=>`<tr><td>${esc(k)}</td><td>${esc(typeof v==='object'?JSON.stringify(v):v)}</td></tr>`).join('')+'</table>';
+-  panel.classList.remove('hidden');panel.scrollIntoView({behavior:'smooth',block:'start'});
++  panel.classList.remove('hidden');requestAnimationFrame(()=>applyResultZoom(panel.querySelector('.result-comparison'),100));panel.scrollIntoView({behavior:'smooth',block:'start'});
+  }catch(e){alert(e.message)}
+ };
+ $('closeSavedAnalysis').onclick=()=>{$('savedAnalysisPanel').classList.add('hidden');savedAnalysis=null;};
+@@ -544,6 +658,7 @@
+  if(!savedAnalysis)return;

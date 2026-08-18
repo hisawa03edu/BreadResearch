@@ -1,0 +1,100 @@
+ 
+-def analyze(input_path, output_dir, intermediate_dir, prefix, parameters):
++def largest_filled_component(binary):
++    contours_result = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
++    contours = contours_result[0] if len(contours_result) == 2 else contours_result[1]
++    if not contours:
++        return np.zeros_like(binary, dtype=np.uint8)
++    contour = max(contours, key=cv2.contourArea)
++    result = np.zeros_like(binary, dtype=np.uint8)
++    cv2.drawContours(result, [contour], -1, 255, cv2.FILLED)
++    return result
++
++
++def detect_bread_mask(source, parameters):
++    height, width = source.shape[:2]
++    if min(width, height) < 20:
++        raise RuntimeError("パン輪郭を検出するには画像が小さすぎます。")
++    margin = max(2, int(round(min(width, height) * 0.02)))
++    rectangle = (margin, margin, max(1, width - margin * 2), max(1, height - margin * 2))
++    grabcut_mask = np.zeros((height, width), dtype=np.uint8)
++    background_model = np.zeros((1, 65), np.float64)
++    foreground_model = np.zeros((1, 65), np.float64)
++    try:
++        cv2.grabCut(
++            source,
++            grabcut_mask,
++            rectangle,
++            background_model,
++            foreground_model,
++            max(1, as_int(parameters, "bread_grabcut_iterations", 5)),
++            cv2.GC_INIT_WITH_RECT,
++        )
++        candidate = np.where(
++            (grabcut_mask == cv2.GC_FGD) | (grabcut_mask == cv2.GC_PR_FGD), 255, 0
++        ).astype(np.uint8)
++        candidate = largest_filled_component(candidate)
++    except cv2.error:
++        candidate = np.zeros((height, width), dtype=np.uint8)
++
++    fraction = float(cv2.countNonZero(candidate)) / float(width * height)
++    if fraction < 0.03 or fraction > 0.95:
++        gray = cv2.cvtColor(source, cv2.COLOR_BGR2GRAY)
++        gray = cv2.GaussianBlur(gray, (9, 9), 0)
++        unused, threshold = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
++        candidate = largest_filled_component(threshold)
++
++    smooth_size = odd(as_int(parameters, "bread_mask_smooth", 15), 3)
++    smooth_size = min(smooth_size, 51)
++    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (smooth_size, smooth_size))
++    candidate = cv2.morphologyEx(candidate, cv2.MORPH_CLOSE, kernel)
++    candidate = cv2.morphologyEx(candidate, cv2.MORPH_OPEN, kernel)
++    candidate = largest_filled_component(candidate)
++    fraction = float(cv2.countNonZero(candidate)) / float(width * height)
++    if fraction < 0.03 or fraction > 0.95:
++        raise RuntimeError("パン輪郭を安定して検出できません。背景との明暗差または撮影範囲を確認してください。")
++    return candidate
++
++
++def analyze(input_path, output_dir, intermediate_dir, prefix, parameters, measurement_mask_path=None):
+     source = cv2.imread(input_path, cv2.IMREAD_COLOR)
+     if source is None:
+         raise RuntimeError("解析画像を読み込めません。")
+@@ -77,6 +133,25 @@
+     if width < 2 or height < 2:
+         raise RuntimeError("解析画像が小さすぎます。")
+ 
++    analysis_scope = str(parameters.get("analysis_scope", "rectangle"))
++    if measurement_mask_path:
++        measurement_mask = cv2.imread(measurement_mask_path, cv2.IMREAD_GRAYSCALE)
++        if measurement_mask is None:
++            raise RuntimeError("保存されたパン輪郭マスクを読み込めません。")
++        if measurement_mask.shape[:2] != (height, width):
++            raise RuntimeError("パン輪郭マスクと解析画像のサイズが一致しません。輪郭を再検出してください。")
++        unused, measurement_mask = cv2.threshold(measurement_mask, 127, 255, cv2.THRESH_BINARY)
++        measurement_mask = largest_filled_component(measurement_mask)
++    elif analysis_scope == "bread":
++        measurement_mask = detect_bread_mask(source, parameters)
++    else:
++        measurement_mask = np.full((height, width), 255, dtype=np.uint8)
++
++    if analysis_scope == "bread":
++        measurement_fraction = float(cv2.countNonZero(measurement_mask)) / float(width * height)
++        if measurement_fraction < 0.01 or measurement_fraction > 0.98:
++            raise RuntimeError("パン輪郭の面積が不正です。輪郭を再検出または手動修正してください。")
++
+     gray = cv2.cvtColor(source, cv2.COLOR_BGR2GRAY)
+     if as_bool(parameters, "use_clahe", True):
+         tile_count = max(1, as_int(parameters, "clahe_tiles", 8))
+@@ -207,6 +282,14 @@
+         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
+         morphology = cv2.morphologyEx(morphology, cv2.MORPH_CLOSE, kernel)
+ 
++    border_margin = max(0, as_int(parameters, "border_margin", 3))
++    analysis_domain = measurement_mask.copy()
++    if border_margin > 0:
++        erosion_size = border_margin * 2 + 1
++        erosion_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (erosion_size, erosion_size))
++        analysis_domain = cv2.erode(analysis_domain, erosion_kernel)
++    morphology = cv2.bitwise_and(morphology, analysis_domain)
++

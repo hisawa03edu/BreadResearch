@@ -1,0 +1,2 @@
+     parent_sample_id BIGINT UNSIGNED NULL,
+     revision_no INT NOT NULL DEFAULT 1,

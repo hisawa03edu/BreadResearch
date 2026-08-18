@@ -1,0 +1,100 @@
++    }
++
+     if ($action === 'analyze_python') {
+         foreach (['experiment_id','treatment_id','sample_code','dpi','parameters','analysis_image','original_image'] as $key) {
+             if (!array_key_exists($key, $input)) respond(['ok'=>false,'error'=>"不足項目: {$key}"],422);
+@@ -656,15 +682,28 @@
+             if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) throw new RuntimeException('画像保存ディレクトリを作成できません。');
+         }
+         $inputPath = saveDataUrlAbsolute((string)$input['analysis_image'], $tmpDir, 'roi');
++        $analysisScope = (string)($input['parameters']['analysis_scope'] ?? 'rectangle');
++        $breadMaskPath = null;
++        $breadMaskAbsolute = null;
++        if ($analysisScope === 'bread') {
++            $breadMaskPath = saveDataUrl((string)($input['bread_mask'] ?? ''), $intermediateDir, 'bread_mask');
++            if ($breadMaskPath === null) {
++                if (is_file($inputPath)) @unlink($inputPath);
++                respond(['ok'=>false,'error'=>'パン輪郭を自動検出し、必要に応じて修正してから解析してください。'],422);
++            }
++            $breadMaskAbsolute = __DIR__ . '/' . $breadMaskPath;
++        }
+         $prefix = 'analysis_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4));
+         try {
+-            $analysis = runPython($config, [
++            $pythonArguments = [
+                 '--input', $inputPath,
+                 '--output-dir', $resultDir,
+                 '--intermediate-dir', $intermediateDir,
+                 '--parameters-json', json_encode($input['parameters'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                 '--prefix', $prefix,
+-            ]);
++            ];
++            if ($breadMaskAbsolute !== null) { $pythonArguments[]='--measurement-mask'; $pythonArguments[]=$breadMaskAbsolute; }
++            $analysis = runPython($config, $pythonArguments);
+         } finally {
+             if (is_file($inputPath)) @unlink($inputPath);
+         }
+@@ -675,8 +714,8 @@
+         $input['summary'] = $analysis['summary'] ?? [];
+         $input['holes'] = $analysis['holes'] ?? [];
+         $input['parameters']['engine'] = 'Python OpenCV 4.5.5';
+-        $input['parameters']['algorithm_version'] = $analysis['engine']['algorithm_version'] ?? '10.2.1-python';
+-        $saved = insertAnalysis($pdo, $config, $input, $originalPath, $resultPath);
++        $input['parameters']['algorithm_version'] = $analysis['engine']['algorithm_version'] ?? '10.5.0-python';
++        $saved = insertAnalysis($pdo, $config, $input, $originalPath, $resultPath, $breadMaskPath);
+         $intermediates = [];
+         foreach (($analysis['intermediates'] ?? []) as $name => $fileName) {
+             $intermediates[$name] = resultPublicPath($intermediateDir, $fileName);
+@@ -688,6 +727,7 @@
+             'summary' => $input['summary'],
+             'holes' => $input['holes'],
+             'result_image_path' => $resultPath,
++            'bread_mask_path' => $breadMaskPath,
+             'intermediates' => $intermediates,
+             'engine' => $analysis['engine'] ?? null,
+         ]);
+@@ -696,7 +736,7 @@
+     if ($action === 'save_analysis') {
+         $originalPath = saveDataUrl((string)($input['original_image'] ?? ''), __DIR__.'/uploads/original', 'original');
+         $resultPath = saveDataUrl((string)($input['result_image'] ?? ''), __DIR__.'/uploads/result', 'result');
+-        $saved = insertAnalysis($pdo, $config, $input, $originalPath, $resultPath);
++        $saved = insertAnalysis($pdo, $config, $input, $originalPath, $resultPath, null);
+         respond(['ok' => true, 'sample_id' => $saved['sample_id'], 'processed_at' => $saved['processed_at']]);
+     }
+ 
+@@ -718,11 +758,11 @@
+ 
+     if ($action === 'delete_sample') {
+         $sid = (int)($input['sample_id'] ?? 0);
+-        $st = $pdo->prepare("SELECT original_image_path,result_image_path FROM samples WHERE id=?");
++        $st = $pdo->prepare("SELECT original_image_path,result_image_path,bread_mask_path FROM samples WHERE id=?");
+         $st->execute([$sid]);
+         $row = $st->fetch();
+         if ($row) {
+-            foreach (['original_image_path','result_image_path'] as $k) {
++            foreach (['original_image_path','result_image_path','bread_mask_path'] as $k) {
+                 if (!empty($row[$k])) {
+                     $path = __DIR__ . '/' . $row[$k];
+                     if (is_file($path)) @unlink($path);
+diff -ruN old/assets/app.js new/assets/app.js
+--- old/assets/app.js	2026-08-18 06:42:21.857013417 +0000
++++ new/assets/app.js	2026-08-18 06:42:21.857995269 +0000
+@@ -15,6 +15,7 @@
+ let selectedSampleIds=new Set();
+ let selectedExperimentId=null;
+ let currentStats=null;
++let breadMaskStateCanvas=null,breadMaskOriginalDataUrl=null,breadMaskPrepared=null,breadMaskEditMode='add';
+ let engineReady=false;
+ let activeAnalysisController=null;
+ let engineDiagnostic=null;
+@@ -25,8 +26,8 @@
+ }
+ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ const num=id=>Number($(id).value);
+-function parameters(){return{dpi:num('dpi'),max_dimension:num('maxDimension'),use_clahe:$('useClahe').value==='1',clahe_clip:num('claheClip'),clahe_tiles:num('claheTiles'),blur_size:num('blurSize'),threshold_mode:$('thresholdMode').value,hole_threshold:num('holeThreshold'),adaptive_block:num('adaptiveBlock'),adaptive_c:num('adaptiveC'),open_size:num('openSize'),close_size:num('closeSize'),use_distance:$('useDistance').value==='1',distance_ratio:num('distanceRatio'),use_watershed:$('useWatershed').value==='1',background_dilate:num('backgroundDilate'),use_large_hole_rescue:$('useLargeHoleRescue').value==='1',large_hole_window:num('largeHoleWindow'),large_hole_contrast:num('largeHoleContrast'),large_hole_min_area_mm2:num('largeHoleMinArea'),large_hole_max_fraction:num('largeHoleMaxFraction')/100,border_margin:num('borderMargin'),min_area_mm2:num('minArea'),max_area_mm2:num('maxArea'),min_circularity:num('minCircularity'),max_aspect_ratio:num('maxAspect'),small_limit_mm:num('smallLimit'),medium_limit_mm:num('mediumLimit'),fill_contours:$('fillContours').value==='1',show_numbers:$('showNumbers').value==='1',save_intermediates:$('saveIntermediates').value==='1'};}
+-function setParameters(p){const m={dpi:'dpi',max_dimension:'maxDimension',use_clahe:'useClahe',clahe_clip:'claheClip',clahe_tiles:'claheTiles',blur_size:'blurSize',threshold_mode:'thresholdMode',hole_threshold:'holeThreshold',adaptive_block:'adaptiveBlock',adaptive_c:'adaptiveC',open_size:'openSize',close_size:'closeSize',use_distance:'useDistance',distance_ratio:'distanceRatio',use_watershed:'useWatershed',background_dilate:'backgroundDilate',use_large_hole_rescue:'useLargeHoleRescue',large_hole_window:'largeHoleWindow',large_hole_contrast:'largeHoleContrast',large_hole_min_area_mm2:'largeHoleMinArea',border_margin:'borderMargin',min_area_mm2:'minArea',max_area_mm2:'maxArea',min_circularity:'minCircularity',max_aspect_ratio:'maxAspect',small_limit_mm:'smallLimit',medium_limit_mm:'mediumLimit',fill_contours:'fillContours',show_numbers:'showNumbers',save_intermediates:'saveIntermediates'};Object.entries(m).forEach(([k,id])=>{if(p[k]!=null)$(id).value=typeof p[k]==='boolean'?(p[k]?'1':'0'):p[k]});if(p.large_hole_max_fraction!=null)$('largeHoleMaxFraction').value=Number(p.large_hole_max_fraction)*100;}
++function parameters(){return{analysis_scope:$('analysisScope').value,dpi:num('dpi'),max_dimension:num('maxDimension'),use_clahe:$('useClahe').value==='1',clahe_clip:num('claheClip'),clahe_tiles:num('claheTiles'),blur_size:num('blurSize'),threshold_mode:$('thresholdMode').value,hole_threshold:num('holeThreshold'),adaptive_block:num('adaptiveBlock'),adaptive_c:num('adaptiveC'),open_size:num('openSize'),close_size:num('closeSize'),use_distance:$('useDistance').value==='1',distance_ratio:num('distanceRatio'),use_watershed:$('useWatershed').value==='1',background_dilate:num('backgroundDilate'),use_large_hole_rescue:$('useLargeHoleRescue').value==='1',large_hole_window:num('largeHoleWindow'),large_hole_contrast:num('largeHoleContrast'),large_hole_min_area_mm2:num('largeHoleMinArea'),large_hole_max_fraction:num('largeHoleMaxFraction')/100,border_margin:num('borderMargin'),min_area_mm2:num('minArea'),max_area_mm2:num('maxArea'),min_circularity:num('minCircularity'),max_aspect_ratio:num('maxAspect'),small_limit_mm:num('smallLimit'),medium_limit_mm:num('mediumLimit'),fill_contours:$('fillContours').value==='1',show_numbers:$('showNumbers').value==='1',save_intermediates:$('saveIntermediates').value==='1'};}
++function setParameters(p){const m={analysis_scope:'analysisScope',dpi:'dpi',max_dimension:'maxDimension',use_clahe:'useClahe',clahe_clip:'claheClip',clahe_tiles:'claheTiles',blur_size:'blurSize',threshold_mode:'thresholdMode',hole_threshold:'holeThreshold',adaptive_block:'adaptiveBlock',adaptive_c:'adaptiveC',open_size:'openSize',close_size:'closeSize',use_distance:'useDistance',distance_ratio:'distanceRatio',use_watershed:'useWatershed',background_dilate:'backgroundDilate',use_large_hole_rescue:'useLargeHoleRescue',large_hole_window:'largeHoleWindow',large_hole_contrast:'largeHoleContrast',large_hole_min_area_mm2:'largeHoleMinArea',border_margin:'borderMargin',min_area_mm2:'minArea',max_area_mm2:'maxArea',min_circularity:'minCircularity',max_aspect_ratio:'maxAspect',small_limit_mm:'smallLimit',medium_limit_mm:'mediumLimit',fill_contours:'fillContours',show_numbers:'showNumbers',save_intermediates:'saveIntermediates'};Object.entries(m).forEach(([k,id])=>{if(p[k]!=null)$(id).value=typeof p[k]==='boolean'?(p[k]?'1':'0'):p[k]});if(p.large_hole_max_fraction!=null)$('largeHoleMaxFraction').value=Number(p.large_hole_max_fraction)*100;updateAnalysisScopeUi();}
+ 
+ function setProgressIndeterminate(on){
+  const shell=$('progressShell');

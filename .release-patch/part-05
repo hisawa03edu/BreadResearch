@@ -1,0 +1,100 @@
+  try{
+   let p={};try{p=JSON.parse(savedAnalysis.parameter_json||'{}')}catch(e){}
++  if(!p.analysis_scope)p.analysis_scope='rectangle';
+   setParameters(p);
+   try{roi=savedAnalysis.roi_json?JSON.parse(savedAnalysis.roi_json):null}catch(e){roi=null}
+   $('analysisExperiment').value=String(savedAnalysis.experiment_id);await refreshTreatments();
+@@ -562,8 +677,14 @@
+   const ext=blob.type==='image/png'?'.png':blob.type==='image/webp'?'.webp':'.jpg';
+   rerunFile=new File([blob],`${savedAnalysis.sample_code}_R${Number(savedAnalysis.revision_no||1)+1}${ext}`,{type:blob.type||'image/jpeg'});
+   rerunMeta={parent:savedAnalysis.parent_sample_id||savedAnalysis.id,revision:Number(savedAnalysis.revision_no||1)+1};
++  if(p.analysis_scope==='bread'&&savedAnalysis.bread_mask_path){
++    const image=await loadImage(rerunFile),prepared=prepareBreadImage(image,p);
++    await setupBreadMaskEditor(prepared,`${savedAnalysis.bread_mask_path}?t=${Date.now()}`);
++  }else if(p.analysis_scope==='bread'){
++    breadMaskStateCanvas=null;breadMaskPrepared=null;$('breadMaskEditor').classList.add('hidden');
++  }
+   document.querySelector('[data-tab="analyze"]').click();
+-  $('analysisProgress').innerHTML='<span class="notice">保存済み元画像・解析条件・ROIを読み込みました。必要に応じて調整して「選択画像を解析して保存」を押してください。</span>';
++  $('analysisProgress').innerHTML=`<span class="notice">保存済み元画像・解析条件・${p.analysis_scope==='bread'?'パン輪郭':'ROI'}を読み込みました。必要に応じて調整して「選択画像を解析して保存」を押してください。</span>`;
+  }catch(e){alert(e.message)}
+ };
+ $('openSavedManualEditor').onclick=()=>{
+diff -ruN old/assets/style.css new/assets/style.css
+--- old/assets/style.css	2026-08-18 06:42:21.861590336 +0000
++++ new/assets/style.css	2026-08-18 06:42:21.862623656 +0000
+@@ -12,7 +12,8 @@
+ button:disabled{opacity:.55;cursor:not-allowed}.hidden{display:none!important}.center-card{max-width:420px;margin:12vh auto;background:white;padding:28px;border:1px solid var(--line);border-radius:12px}
+ .center-card input,.center-card button{margin-top:12px}.error{color:#b91c1c;margin-top:10px}.notice{padding:10px;border-radius:7px;background:#fff7d6;margin:8px 0}
+ .table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid var(--line);padding:7px;white-space:nowrap;text-align:right}th{background:#eef2f6}th:first-child,td:first-child{text-align:left}
+-.result-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.result-grid img{width:100%;max-height:480px;object-fit:contain;background:#222}.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}.metric{background:#eef5fb;padding:10px;border-radius:7px}
++.result-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.result-grid>*{min-width:0}.result-grid figure{margin:0}.result-grid figcaption{text-align:center;padding:5px;font-size:13px}.result-grid>img,.result-grid>figure>img{width:100%;max-height:480px;object-fit:contain;background:#222}.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}.metric{background:#eef5fb;padding:10px;border-radius:7px}
++.result-view-controls{display:grid;gap:6px;margin-bottom:7px}.result-comparison{min-width:0;max-width:100%}.result-opacity-control,.result-zoom-control{display:grid;grid-template-columns:auto minmax(140px,1fr) 48px;align-items:center;gap:9px;font-weight:600}.result-opacity-control input,.result-zoom-control input{padding:0}.result-opacity-control output,.result-zoom-control output{text-align:right;font-variant-numeric:tabular-nums}.result-zoom-viewport{display:block;width:100%;max-width:100%;height:520px;min-width:0;overflow:scroll;background:#222;border:1px solid #ccd3da}.result-overlay-stage{position:relative;display:block;width:100%;aspect-ratio:var(--result-aspect,4/3);overflow:hidden;background:#222}.result-overlay-stage.zoom-reduced{margin-left:auto;margin-right:auto}.result-overlay-stage .result-base-image,.result-overlay-stage .result-overlay-image{position:absolute!important;inset:0;display:block;width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;object-fit:fill!important;background:transparent}.result-overlay-stage .result-overlay-image{transition:opacity .08s linear}
+ .chart-box{height:430px;margin:20px 0;overflow-x:auto;background:#fff;border:1px solid var(--line);border-radius:8px}
+ .chart-box canvas{display:block;min-width:620px}
+ @media(max-width:900px){.grid2,.form-grid,.result-grid{grid-template-columns:1fr}.span2{grid-column:auto}.metric-grid{grid-template-columns:1fr 1fr}nav{overflow:auto}}
+@@ -30,7 +31,7 @@
+ .paper-graph{background:white;padding:15px;border:1px solid var(--line);margin-top:12px}
+ .history-badge{padding:2px 7px;border-radius:10px;background:#eef2f6}
+ 
+-#analysisStatus{background:#e8f5e9}.result-grid img{border:1px solid #ccd3da}
++#analysisStatus{background:#e8f5e9}.result-grid>img,.result-grid>figure>img{border:1px solid #ccd3da}
+ 
+ .roi-controls{
+   display:grid;
+@@ -40,6 +41,7 @@
+   margin:12px 0;
+ }
+ .roi-controls button{height:40px}
++.scope-selector{max-width:420px;margin:10px 0}.bread-mask-controls{margin-top:14px;padding:12px;background:#eef7f0;border:1px solid #bdd8c4;border-radius:8px}.mask-toolbar{display:flex;align-items:end;gap:8px;flex-wrap:wrap;margin:10px 0}.mask-toolbar label{max-width:150px}.mask-toolbar button.active{background:#1769aa;color:#fff}.bread-mask-stage{position:relative;display:inline-block;max-width:100%;overflow:auto;background:#222;line-height:0}.bread-mask-stage canvas{display:block;max-width:none}.bread-mask-stage #breadMaskOverlayCanvas{position:absolute;left:0;top:0;cursor:crosshair;opacity:.45;touch-action:none;user-select:none}
+ #roiCanvas{cursor:grab;user-select:none}
+ .small-note{font-size:12px;color:#5f6b76}
+ @media(max-width:900px){
+diff -ruN old/config.sample.php new/config.sample.php
+--- old/config.sample.php	2026-08-18 06:42:21.865938089 +0000
++++ new/config.sample.php	2026-08-18 06:42:21.867026816 +0000
+@@ -13,7 +13,7 @@
+     'login_password_hash' => '',
+     'login_password_plain' => 'CHANGE_ME_NOW',
+     'app_name' => 'パン断面 研究解析システム',
+-    'app_version' => '10.4.0',
++    'app_version' => '10.5.5',
+     'python' => [
+         // Xserver上で構築済みの仮想環境を指定します。
+         'binary' => '/home/a-pages/python/venv/bin/python',
+diff -ruN old/index.php new/index.php
+--- old/index.php	2026-08-18 06:42:21.870698547 +0000
++++ new/index.php	2026-08-18 06:42:21.871624757 +0000
+@@ -11,7 +11,7 @@
+ <meta charset="utf-8">
+ <meta name="viewport" content="width=device-width,initial-scale=1">
+ <title><?= htmlspecialchars($appName, ENT_QUOTES, 'UTF-8') ?></title>
+-<link rel="stylesheet" href="assets/style.css">
++<link rel="stylesheet" href="assets/style.css?v=10.5.5">
+ </head>
+ <body>
+ <div id="loginView" class="center-card hidden">
+@@ -24,7 +24,7 @@
+ 
+ <div id="appView" class="hidden">
+ <header>
+-  <div><h1><?= htmlspecialchars($appName, ENT_QUOTES, 'UTF-8') ?></h1><small>PHP + MySQL + Python OpenCV Version 10.4</small></div>
++  <div><h1><?= htmlspecialchars($appName, ENT_QUOTES, 'UTF-8') ?></h1><small>PHP + MySQL + Python OpenCV Version 10.5.5</small></div>
+   <button id="logoutButton">ログアウト</button>
+ </header>
+ 
+@@ -172,10 +172,10 @@
+   </details>
+ 
+   <div class="card">
+-    <h2>ROI（解析領域）</h2>
++    <h2>解析範囲・ROI</h2>
++    <div class="scope-selector"><label>気泡を調べる範囲<select id="analysisScope"><option value="rectangle" selected>矩形ROI（従来方式）</option><option value="bread">パン輪郭内（パン面積を自動計測）</option></select></label></div>
+     <p>
+-      ROIの幅（W）と高さ（H）を指定し、画像上で矩形をドラッグして位置を移動します。
+-      矩形内だけを解析するため、すべてのサンプルを同じ面積で比較できます。
++      矩形ROIでは従来どおり一定範囲を比較します。パン輪郭内では背景とパンの境界を自動検出し、手動修正した輪郭内だけを解析します。
+     </p>
+     <div class="roi-controls">
+       <label>ROI幅 W（px）
+@@ -201,6 +201,20 @@

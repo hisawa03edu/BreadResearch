@@ -1,0 +1,100 @@
+     final_mask = morphology.copy()
+     distance = np.zeros_like(gray, dtype=np.float32)
+     watershed_view = source.copy()
+@@ -237,16 +320,17 @@
+ 
+     # Preserve the full shape of rescued broad pores after Watershed.
+     if as_bool(parameters, "use_large_hole_rescue", True):
++        large_hole_mask = cv2.bitwise_and(large_hole_mask, analysis_domain)
+         final_mask = cv2.bitwise_or(final_mask, large_hole_mask)
+ 
+-    border_margin = max(0, as_int(parameters, "border_margin", 3))
+-    if border_margin > 0:
++    final_mask = cv2.bitwise_and(final_mask, analysis_domain)
++    if border_margin > 0 and analysis_scope != "bread":
+         border_margin = min(border_margin, max(1, min(width, height) // 2))
+         cv2.rectangle(final_mask, (0, 0), (width - 1, height - 1), 0, border_margin)
+ 
+     contours_result = cv2.findContours(final_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+     contours = contours_result[0] if len(contours_result) == 2 else contours_result[1]
+-    bread_area_mm2 = width * height * pixel_area_to_mm2
++    bread_area_mm2 = cv2.countNonZero(measurement_mask) * pixel_area_to_mm2
+     minimum_area = max(0.0, as_float(parameters, "min_area_mm2", 0.15))
+     maximum_area = max(0.0, as_float(parameters, "max_area_mm2", 0.0))
+     minimum_circularity = max(0.0, as_float(parameters, "min_circularity", 0.0))
+@@ -303,6 +387,10 @@
+         thickness = cv2.FILLED if as_bool(parameters, "fill_contours", True) else 2
+         cv2.drawContours(overlay, [contour], -1, color, thickness)
+     result_image = cv2.addWeighted(source, 0.70, overlay, 0.30, 0)
++    if analysis_scope == "bread":
++        bread_contours_result = cv2.findContours(measurement_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
++        bread_contours = bread_contours_result[0] if len(bread_contours_result) == 2 else bread_contours_result[1]
++        cv2.drawContours(result_image, bread_contours, -1, (255, 100, 0), 3)
+     for contour, number, size_class, center_x, center_y in accepted:
+         color = colors[size_class]
+         cv2.drawContours(result_image, [contour], -1, color, 2)
+@@ -350,6 +438,7 @@
+             "clahe": enhanced,
+             "threshold": binary,
+             "morphology": morphology,
++            "measurement_mask": measurement_mask,
+             "large_hole_contrast": large_hole_contrast,
+             "large_hole_mask": large_hole_mask,
+             "final_mask": final_mask,
+@@ -384,11 +473,14 @@
+ def parse_arguments():
+     parser = argparse.ArgumentParser()
+     parser.add_argument("--diagnose", action="store_true")
++    parser.add_argument("--detect-bread", action="store_true")
+     parser.add_argument("--input")
+     parser.add_argument("--output-dir")
+     parser.add_argument("--intermediate-dir")
+     parser.add_argument("--parameters-json", default="{}")
+     parser.add_argument("--prefix", default="analysis")
++    parser.add_argument("--mask-output")
++    parser.add_argument("--measurement-mask")
+     return parser.parse_args()
+ 
+ 
+@@ -396,6 +488,24 @@
+     arguments = parse_arguments()
+     if arguments.diagnose:
+         result = diagnostic_result()
++    elif arguments.detect_bread:
++        if not arguments.input or not arguments.mask_output:
++            raise RuntimeError("パン輪郭検出に必要な引数が不足しています。")
++        source = cv2.imread(arguments.input, cv2.IMREAD_COLOR)
++        if source is None:
++            raise RuntimeError("輪郭検出画像を読み込めません。")
++        parameters = json.loads(arguments.parameters_json)
++        mask = detect_bread_mask(source, parameters)
++        if not cv2.imwrite(arguments.mask_output, mask):
++            raise RuntimeError("パン輪郭マスクを書き出せません。")
++        result = {
++            "ok": True,
++            "mode": "bread_mask",
++            "width": int(mask.shape[1]),
++            "height": int(mask.shape[0]),
++            "area_pixels": int(cv2.countNonZero(mask)),
++            "algorithm_version": ALGORITHM_VERSION,
++        }
+     else:
+         if not arguments.input or not arguments.output_dir or not arguments.intermediate_dir:
+             raise RuntimeError("解析に必要な引数が不足しています。")
+@@ -408,6 +518,7 @@
+             arguments.intermediate_dir,
+             arguments.prefix,
+             parameters,
++            arguments.measurement_mask,
+         )
+     print(json.dumps(result, ensure_ascii=False, allow_nan=False, separators=(",", ":")))
+ 
+diff -ruN old/schema.sql new/schema.sql
+--- old/schema.sql	2026-08-18 06:42:21.883422229 +0000
++++ new/schema.sql	2026-08-18 06:42:21.884279271 +0000
+@@ -51,6 +51,7 @@
+     large_hole_count INT NOT NULL DEFAULT 0,
+     original_image_path VARCHAR(500) NULL,
+     result_image_path VARCHAR(500) NULL,
++    bread_mask_path VARCHAR(500) NULL,
+     app_version VARCHAR(50) NOT NULL,
