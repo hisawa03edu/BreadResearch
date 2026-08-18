@@ -1,5 +1,6 @@
 name: Apply data list thumbnails
 
+# Trigger once after installation so the verified feature patch is applied.
 on:
   push:
     branches:
