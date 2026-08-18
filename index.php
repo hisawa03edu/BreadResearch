@@ -303,6 +303,13 @@ if (file_exists($configFile)) {
         </div>
         <figcaption>解析結果（拡大時は画像内をスクロールできます）</figcaption>
       </figure>
+      <figure id="savedBinaryFigure" class="result-comparison hidden">
+        <div class="result-view-controls">
+          <label class="result-zoom-control">表示倍率 <input id="savedBinaryZoom" class="result-zoom-range" type="range" min="25" max="300" step="5" value="100"><output id="savedBinaryZoomValue">100%</output></label>
+        </div>
+        <div class="result-zoom-viewport"><div id="savedBinaryStage" class="result-overlay-stage"><img id="savedBinaryImage" class="result-base-image" alt="保存済み二値化画像"></div></div>
+        <figcaption>二値化画像（白＝空洞・黒＝生地・灰＝解析範囲外）</figcaption>
+      </figure>
     </div>
     <details open>
       <summary><strong>保存された解析条件・ROI</strong></summary>
@@ -333,10 +340,10 @@ if (file_exists($configFile)) {
         <option value="bread_area_mm2">パン断面積(mm²)</option>
         <option value="hole_area_mm2">空洞合計面積(mm²)</option>
         <option value="porosity_percent">空洞率(%)</option>
-        <option value="binary_white_area_mm2">二値化白領域（空洞）面積(mm²)</option>
-        <option value="binary_black_area_mm2">二値化黒領域（生地）面積(mm²)</option>
-        <option value="binary_white_percent">二値化白領域率(%)</option>
-        <option value="binary_black_percent">二値化黒領域率(%)</option>
+        <option value="binary_white_area_mm2">二値化白領域（空洞）面積 mm²</option>
+        <option value="binary_black_area_mm2">二値化黒領域（生地）面積 mm²</option>
+        <option value="binary_white_percent">二値化白領域率 %</option>
+        <option value="binary_black_percent">二値化黒領域率 %</option>
         <option value="hole_count">空洞数</option>
         <option value="mean_hole_area_mm2">平均空洞面積(mm²)</option>
         <option value="median_hole_area_mm2">中央値空洞面積(mm²)</option>
@@ -366,6 +373,6 @@ if (file_exists($configFile)) {
 
 <canvas id="workCanvas" class="hidden"></canvas>
 <script defer src="assets/vendor/xlsx.full.min.js"></script>
-<script defer src="assets/app.js?v=10.6.0"></script>
+<script defer src="assets/app.js?v=10.6.0-view2"></script>
 </body>
 </html>
