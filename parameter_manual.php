@@ -3,6 +3,7 @@ declare(strict_types=1);
 session_start();
 if (empty($_SESSION['bread_logged_in'])) { header('Location: index.php'); exit; }
 $rows = [
+['解析範囲','analysis_scope','矩形ROI','気泡解析の母集団を矩形ROIまたはパン輪郭内から選択。パン輪郭内では保存マスクからパン面積を計算。','矩形ROIは同一寸法・同一位置の比較に適する。','パン輪郭内はパン全体の面積と空洞率を評価できる。','研究目的に合わせて選び、同一比較内では方式を統一。'],
 ['DPI','dpi','300','ピクセルをmmへ換算する基準。面積・直径など全実寸値に影響。','低いほど算出寸法が大きい。','高いほど算出寸法が小さい。','実際の撮影条件または校正値を使用。'],
 ['解析縮小上限(px)','max_dimension','1400','ROI長辺をこの値以下に縮小して解析。','高速になるが微小空洞が消えやすい。','精細になるが時間・メモリが増える。','通常1200～2000。微小空洞重視は1800以上。'],
 ['CLAHE','use_clahe','使用','局所コントラストを補正して照明ムラを軽減。','自然な濃度を保つが暗部を取りこぼす場合がある。','弱い空洞と同時に微細模様も強調。','通常は使用。均一照明で過検出時は不使用も比較。'],
@@ -36,12 +37,13 @@ $rows = [
 ['中間画像','save_intermediates','表示','各工程とlarge_hole_maskを保存。','容量とI/Oを削減。','原因調査と再現性確認に有効。','条件決定中は表示。大量解析時は容量を確認。'],
 ];
 ?><!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>解析パラメータ説明マニュアル</title><link rel="stylesheet" href="assets/style.css"><style>
+<title>解析パラメータ説明マニュアル</title><link rel="stylesheet" href="assets/style.css?v=10.5.5"><style>
 body{background:#f4f7fa}.manual{max-width:1500px;margin:auto;padding:24px}.manual-head{display:flex;gap:12px;align-items:center;justify-content:space-between}.manual table{min-width:1250px}.manual td,.manual th{vertical-align:top;line-height:1.5;white-space:normal;text-align:left}.manual th{position:sticky;top:0;background:#eaf2f9;z-index:1}.manual code{white-space:nowrap}.flow{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.flow div{background:#fff;border:1px solid #dce4ec;border-radius:8px;padding:12px}.danger{background:#fff0f0;border-color:#e8a5a5}@media(max-width:800px){.manual{padding:10px}.flow{grid-template-columns:1fr}}@media print{.manual{max-width:none;padding:0}.no-print{display:none!important}.manual th{position:static}.manual table{min-width:0;font-size:8px}.manual td,.manual th{padding:4px}}
 </style></head><body><main class="manual">
-<div class="manual-head"><div><h1>解析パラメータ説明マニュアル</h1><p>Bread Research Analyzer Version 10.4 / Python OpenCV</p></div><div class="no-print"><button onclick="window.print()">印刷・PDF保存</button> <button onclick="location.href='index.php#analyze'">解析画面へ戻る</button></div></div>
+<div class="manual-head"><div><h1>解析パラメータ説明マニュアル</h1><p>Bread Research Analyzer Version 10.5.5 / Python OpenCV</p></div><div class="no-print"><button onclick="window.print()">印刷・PDF保存</button> <button onclick="location.href='index.php#analyze'">解析画面へ戻る</button></div></div>
+<section class="card"><h2>パン輪郭内を解析する手順</h2><ol><li>「気泡を調べる範囲」で「パン輪郭内」を選び、画像を1枚選択します。</li><li>「パン輪郭を自動検出」を押します。緑色の範囲がパン面積です。</li><li>不足部分は「パン領域を追加」、背景の混入は「背景として削除」を選び、画像上をドラッグして修正します。</li><li>DPIと推定面積を確認し、「選択画像を解析して保存」を押します。修正済みマスクも保存され、再解析時に読み込まれます。</li></ol><p>パン輪郭の縁から「境界除外幅」だけ内側を気泡解析に使用します。パン面積そのものは、除外前の輪郭マスク全体から計算します。</p></section>
 <section class="card"><h2>推奨する調整順序</h2><div class="flow"><div><b>1. 実寸</b><br>DPI、ROI、縮小上限を確定</div><div><b>2. 候補抽出</b><br>CLAHE、二値化、C値を調整</div><div><b>3. 輪郭整理</b><br>形態処理、Distance、Watershed</div><div><b>4. 採用条件</b><br>面積・形状・分類を固定</div></div></section>
 <section class="card danger"><h2>異常結果</h2><ul><li>空洞数1、空洞率約100%、ROI全体が赤い結果は異常です。</li><li>「大空洞補完」を不使用にし、<code>large_hole_mask</code>を確認してください。</li><li>異常データは統計から除外し、条件修正後に再解析してください。</li></ul></section>
 <section class="card"><h2>全パラメータ一覧</h2><div class="table-wrap"><table><thead><tr><th>画面項目</th><th>保存キー</th><th>標準値</th><th>役割</th><th>下げる／不使用</th><th>上げる／使用</th><th>推奨・注意</th></tr></thead><tbody><?php foreach($rows as $r): ?><tr><?php foreach($r as $i=>$cell): ?><td><?= $i===1?'<code>'.htmlspecialchars($cell,ENT_QUOTES,'UTF-8').'</code>':htmlspecialchars($cell,ENT_QUOTES,'UTF-8') ?></td><?php endforeach; ?></tr><?php endforeach; ?></tbody></table></div></section>
-<section class="card"><h2>研究用途で記録する項目</h2><p>解析日時、アプリ版、アルゴリズム版、DPI、ROI、縮小率、プリセット名、全パラメータ、元画像名を保存します。群比較では同一条件を使用し、途中で条件を変更した場合は別の解析バージョンとして扱います。</p></section>
+<section class="card"><h2>研究用途で記録する項目</h2><p>解析日時、アプリ版、アルゴリズム版、DPI、解析範囲方式、ROIまたは修正済みパン輪郭マスク、縮小率、プリセット名、全パラメータ、元画像名を保存します。群比較では同一条件を使用し、途中で条件を変更した場合は別の解析バージョンとして扱います。</p></section>
 </main></body></html>
