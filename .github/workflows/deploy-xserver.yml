@@ -1,6 +1,9 @@
 name: Deploy to Xserver
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 concurrency:
@@ -27,20 +30,9 @@ jobs:
           XSERVER_PORT: ${{ secrets.XSERVER_PORT }}
         run: |
           set -euo pipefail
-
-          if [ -z "${XSERVER_SSH_KEY:-}" ]; then
-            echo "::error::XSERVER_SSH_KEY is empty."
-            exit 10
-          fi
-          if [ -z "${XSERVER_HOST:-}" ]; then
-            echo "::error::XSERVER_HOST is empty."
-            exit 11
-          fi
-          if [ -z "${XSERVER_USER:-}" ]; then
-            echo "::error::XSERVER_USER is empty."
-            exit 12
-          fi
-
+          test -n "${XSERVER_SSH_KEY:-}" || { echo "::error::XSERVER_SSH_KEY is empty."; exit 10; }
+          test -n "${XSERVER_HOST:-}" || { echo "::error::XSERVER_HOST is empty."; exit 11; }
+          test -n "${XSERVER_USER:-}" || { echo "::error::XSERVER_USER is empty."; exit 12; }
           PORT="${XSERVER_PORT:-10022}"
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
@@ -48,31 +40,16 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           : > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
-
-          echo "Testing SSH connection to configured Xserver host on the configured port..."
           success=0
           for attempt in 1 2 3; do
             echo "SSH attempt ${attempt}/3"
-            if ssh \
-              -i ~/.ssh/id_ed25519 \
-              -p "$PORT" \
-              -o BatchMode=yes \
-              -o StrictHostKeyChecking=accept-new \
-              -o UserKnownHostsFile=~/.ssh/known_hosts \
-              -o ConnectTimeout=20 \
-              -o ConnectionAttempts=1 \
-              "${XSERVER_USER}@${XSERVER_HOST}" \
-              'echo "SSH connection OK"; echo "HOME=$HOME"'; then
+            if ssh -i ~/.ssh/id_ed25519 -p "$PORT" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=20 -o ConnectionAttempts=1 "${XSERVER_USER}@${XSERVER_HOST}" 'echo "SSH connection OK"; echo "HOME=$HOME"'; then
               success=1
               break
             fi
             sleep 5
           done
-
-          if [ "$success" -ne 1 ]; then
-            echo "::error::Could not establish SSH connection after 3 attempts. Check XSERVER_HOST, XSERVER_USER, XSERVER_PORT, Xserver SSH access settings, and the registered public/private key pair."
-            exit 13
-          fi
+          test "$success" -eq 1 || { echo "::error::Could not establish SSH connection after 3 attempts."; exit 13; }
 
       - name: Validate deployment path and production prerequisites
         shell: bash
@@ -85,23 +62,19 @@ jobs:
           set -euo pipefail
           PORT="${XSERVER_PORT:-10022}"
           TARGET="${XSERVER_PATH%/}"
-
           if [ -z "$TARGET" ] || [ "$TARGET" = "/" ]; then
             echo "::error::XSERVER_PATH is empty or '/'. Deployment to the server root is blocked for safety."
             exit 2
           fi
-
-          ssh -i ~/.ssh/id_ed25519 -p "$PORT" \
-            -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            "${XSERVER_USER}@${XSERVER_HOST}" \
+          ssh -i ~/.ssh/id_ed25519 -p "$PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes "${XSERVER_USER}@${XSERVER_HOST}" \
             "set -eu; \
              test -d '$TARGET' || { echo 'XSERVER_PATH does not exist'; exit 3; }; \
              test -w '$TARGET' || { echo 'XSERVER_PATH is not writable'; exit 4; }; \
              test -f '$TARGET/config.php' || { echo 'config.php is missing'; exit 5; }; \
-             grep -Fq '10.5.5' '$TARGET/config.php' || { echo 'config.php app_version is not 10.5.5'; exit 6; }; \
+             grep -Fq '10.6.0' '$TARGET/config.php' || { echo 'config.php app_version is not 10.6.0'; exit 6; }; \
              mkdir -p '$TARGET/uploads/intermediate'; \
              test -w '$TARGET/uploads/intermediate' || { echo 'uploads/intermediate is not writable'; exit 7; }; \
-             echo 'Production prerequisites OK'"
+             echo 'Production prerequisites OK for 10.6.0'"
 
       - name: Deploy application files
         shell: bash
@@ -114,7 +87,6 @@ jobs:
           set -euo pipefail
           PORT="${XSERVER_PORT:-10022}"
           TARGET="${XSERVER_PATH%/}"
-
           rsync -azv \
             --exclude='.git/' \
             --exclude='.github/' \
@@ -136,16 +108,15 @@ jobs:
           set -euo pipefail
           PORT="${XSERVER_PORT:-10022}"
           TARGET="${XSERVER_PATH%/}"
-
-          ssh -i ~/.ssh/id_ed25519 -p "$PORT" \
-            -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            "${XSERVER_USER}@${XSERVER_HOST}" \
+          ssh -i ~/.ssh/id_ed25519 -p "$PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes "${XSERVER_USER}@${XSERVER_HOST}" \
             "set -eu; \
              cd '$TARGET'; \
              test -f index.php; \
              test -f api.php; \
              test -f python/analyze.py; \
-             test -f migration_v10_4_to_v10_5.sql; \
-             grep -Fq 'Version 10.5.5' README.md; \
-             grep -Fq '10.5.5' config.php; \
-             echo 'Deploy verification OK: BreadResearch 10.5.5'"
+             test -f migration_v10_5_5_to_v10_6.sql; \
+             grep -Fq 'Version 10.6.0' README.md; \
+             grep -Fq '10.6.0' config.php; \
+             grep -Fq '10.6.0-python' python/analyze.py; \
+             grep -Fq 'binary_white_area_mm2' api.php; \
+             echo 'Deploy verification OK: BreadResearch 10.6.0'"
