@@ -398,9 +398,12 @@ $('runAnalysis').onclick=async()=>{
    const resultUrl=`${saved.result_image_path}?t=${Date.now()}`;
    const intermediateUrls={};Object.entries(saved.intermediates||{}).forEach(([k,v])=>intermediateUrls[k]=`${v}?t=${Date.now()}`);
    const metrics=Object.entries(saved.summary).map(([k,v])=>`<div class="metric"><b>${esc(metricLabel(k))}</b><br>${formatMetricValue(k,v)}</div>`).join('');
+   const binaryAreaUrl=intermediateUrls.binary_area||'';
+   const binaryViewer=binaryAreaUrl?`<figure class="result-comparison binary-image-viewer"><div class="result-view-controls"><label class="result-zoom-control">表示倍率 <input class="result-zoom-range" type="range" min="25" max="300" step="5" value="100"><output>100%</output></label></div><div class="result-zoom-viewport"><div class="result-overlay-stage" data-image-width="${prepared.width}" data-image-height="${prepared.height}" style="--result-aspect:${prepared.width}/${prepared.height}"><img class="result-base-image" src="${binaryAreaUrl}" alt="二値化画像"></div></div><figcaption>二値化画像（白＝空洞・黒＝生地・灰＝解析範囲外）</figcaption></figure>`:'';
+   const otherIntermediateUrls=Object.fromEntries(Object.entries(intermediateUrls).filter(([key])=>key!=='binary_area'));
    $('analysisResults').insertAdjacentHTML('beforeend',`<div class="card"><h2>${esc(f.name)} <small>${esc(saved.processed_at)}</small></h2>
-    <div class="metric-grid">${metrics}</div><div class="result-grid"><figure><img src="${prepared.originalDataUrl}" alt="元画像"><figcaption>元画像</figcaption></figure><figure class="result-comparison"><div class="result-view-controls"><label class="result-opacity-control">検出結果の濃度 <input class="result-opacity-range" type="range" min="0" max="100" value="60"><output>60%</output></label><label class="result-zoom-control">表示倍率 <input class="result-zoom-range" type="range" min="25" max="300" step="5" value="100"><output>100%</output></label></div><div class="result-zoom-viewport"><div class="result-overlay-stage" data-image-width="${prepared.width}" data-image-height="${prepared.height}" style="--result-aspect:${prepared.width}/${prepared.height}"><img class="result-base-image" src="${prepared.analysisDataUrl}" alt="解析範囲の元画像"><img class="result-overlay-image" src="${resultUrl}" alt="解析結果" style="opacity:.6"></div></div><figcaption>解析結果（拡大時は画像内をスクロールできます）</figcaption></figure></div>
-    ${Object.keys(intermediateUrls).length?`<details><summary>解析途中画像</summary><div class="intermediate-grid">${Object.entries(intermediateUrls).map(([k,u])=>`<figure><img src="${u}"><figcaption>${esc(intermediateLabel(k))}</figcaption></figure>`).join('')}</div></details>`:''}
+    <div class="metric-grid">${metrics}</div><div class="result-grid"><figure><img src="${prepared.originalDataUrl}" alt="元画像"><figcaption>元画像</figcaption></figure><figure class="result-comparison"><div class="result-view-controls"><label class="result-opacity-control">検出結果の濃度 <input class="result-opacity-range" type="range" min="0" max="100" value="60"><output>60%</output></label><label class="result-zoom-control">表示倍率 <input class="result-zoom-range" type="range" min="25" max="300" step="5" value="100"><output>100%</output></label></div><div class="result-zoom-viewport"><div class="result-overlay-stage" data-image-width="${prepared.width}" data-image-height="${prepared.height}" style="--result-aspect:${prepared.width}/${prepared.height}"><img class="result-base-image" src="${prepared.analysisDataUrl}" alt="解析範囲の元画像"><img class="result-overlay-image" src="${resultUrl}" alt="解析結果" style="opacity:.6"></div></div><figcaption>解析結果（拡大時は画像内をスクロールできます）</figcaption></figure>${binaryViewer}</div>
+    ${Object.keys(otherIntermediateUrls).length?`<details><summary>解析途中画像</summary><div class="intermediate-grid">${Object.entries(otherIntermediateUrls).map(([k,u])=>`<figure><img src="${u}"><figcaption>${esc(intermediateLabel(k))}</figcaption></figure>`).join('')}</div></details>`:''}
     <p class="notice">手動補正は「データ一覧」→「画像・結果」から開けます。</p></div>`);
   }catch(e){
    if(e.name==='AbortError'){
@@ -428,10 +431,10 @@ const sampleColumns=[
  {key:'hole_count',label:'空洞数',type:'number',visible:true},
  {key:'hole_area_mm2',label:'空洞合計面積(mm²)',type:'number',visible:false},
  {key:'porosity_percent',label:'空洞率(%)',type:'number',visible:true},
- {key:'binary_white_area_mm2',label:'二値化白領域（空洞）面積(mm²)',type:'number',visible:false},
- {key:'binary_black_area_mm2',label:'二値化黒領域（生地）面積(mm²)',type:'number',visible:false},
- {key:'binary_white_percent',label:'二値化白領域率(%)',type:'number',visible:false},
- {key:'binary_black_percent',label:'二値化黒領域率(%)',type:'number',visible:false},
+ {key:'binary_white_area_mm2',label:'二値化白領域（空洞）面積 mm²',type:'number',visible:false},
+ {key:'binary_black_area_mm2',label:'二値化黒領域（生地）面積 mm²',type:'number',visible:false},
+ {key:'binary_white_percent',label:'二値化白領域率 %',type:'number',visible:false},
+ {key:'binary_black_percent',label:'二値化黒領域率 %',type:'number',visible:false},
  {key:'mean_hole_area_mm2',label:'平均空洞面積(mm²)',type:'number',visible:true},
  {key:'median_hole_area_mm2',label:'中央値空洞面積(mm²)',type:'number',visible:false},
  {key:'max_hole_area_mm2',label:'最大空洞面積(mm²)',type:'number',visible:false},
@@ -592,8 +595,8 @@ $('analyzeSelectedSamples').onclick=async()=>{
 function metricLabel(k){
  const m={bread_area_mm2:'パン断面積(mm²)',hole_count:'空洞数',hole_area_mm2:'空洞合計面積(mm²)',
  porosity_percent:'空洞率(%)',mean_hole_area_mm2:'平均空洞面積(mm²)',
- binary_white_area_mm2:'二値化白領域（空洞）面積(mm²)',binary_black_area_mm2:'二値化黒領域（生地）面積(mm²)',
- binary_white_percent:'二値化白領域率(%)',binary_black_percent:'二値化黒領域率(%)',
+ binary_white_area_mm2:'二値化白領域（空洞）面積 mm²',binary_black_area_mm2:'二値化黒領域（生地）面積 mm²',
+ binary_white_percent:'二値化白領域率 %',binary_black_percent:'二値化黒領域率 %',
  median_hole_area_mm2:'空洞面積中央値(mm²)',max_hole_area_mm2:'最大空洞面積(mm²)',
  mean_eq_diameter_mm:'平均円相当直径(mm)',small_hole_count:'小空洞数',
  medium_hole_count:'中空洞数',large_hole_count:'大空洞数'};
@@ -653,12 +656,21 @@ window.viewSavedAnalysis=async id=>{
   let p={};try{p=JSON.parse(s.parameter_json||'{}')}catch(e){}
   let roiData=null;try{roiData=s.roi_json?JSON.parse(s.roi_json):null}catch(e){}
   await prepareSavedResultBase(originalUrl,resultUrl,p,roiData);
+  const binaryFigure=$('savedBinaryFigure');binaryFigure.classList.add('hidden');
+  if(s.binary_area_image_path){
+   const binaryUrl=`${s.binary_area_image_path}?t=${Date.now()}`;
+   try{
+    const binaryImage=await loadUrlImage(binaryUrl),stage=$('savedBinaryStage');
+    $('savedBinaryImage').src=binaryUrl;stage.dataset.imageWidth=String(binaryImage.naturalWidth);stage.dataset.imageHeight=String(binaryImage.naturalHeight);stage.style.setProperty('--result-aspect',`${binaryImage.naturalWidth}/${binaryImage.naturalHeight}`);stage.style.width='100%';stage.classList.remove('zoom-reduced');
+    $('savedBinaryZoom').value='100';$('savedBinaryZoomValue').textContent='100%';binaryFigure.classList.remove('hidden');
+   }catch(_){binaryFigure.classList.add('hidden');}
+  }
   const rows=[...Object.entries(p),['ROI',roiData?JSON.stringify(roiData):'未指定'],
    ['パン輪郭マスク',s.bread_mask_path||'なし'],
    ['解析バージョン',s.app_version],['改訂番号',s.revision_no]];
   $('savedParameterTable').innerHTML='<table><tr><th>項目</th><th>保存値</th></tr>'+
    rows.map(([k,v])=>`<tr><td>${esc(k)}</td><td>${esc(typeof v==='object'?JSON.stringify(v):v)}</td></tr>`).join('')+'</table>';
-  panel.classList.remove('hidden');requestAnimationFrame(()=>applyResultZoom(panel.querySelector('.result-comparison'),100));panel.scrollIntoView({behavior:'smooth',block:'start'});
+  panel.classList.remove('hidden');requestAnimationFrame(()=>panel.querySelectorAll('.result-comparison:not(.hidden)').forEach(figure=>applyResultZoom(figure,100)));panel.scrollIntoView({behavior:'smooth',block:'start'});
  }catch(e){alert(e.message)}
 };
 $('closeSavedAnalysis').onclick=()=>{$('savedAnalysisPanel').classList.add('hidden');savedAnalysis=null;};

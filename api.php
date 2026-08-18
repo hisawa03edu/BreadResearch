@@ -544,9 +544,9 @@ try {
         $metricLabels = [
             'bread_area_mm2'=>'パン断面積(mm²)','hole_count'=>'空洞数','hole_area_mm2'=>'空洞合計面積(mm²)',
             'porosity_percent'=>'空洞率(%)','mean_hole_area_mm2'=>'平均空洞面積(mm²)',
-            'binary_white_area_mm2'=>'二値化白領域（空洞）面積(mm²)',
-            'binary_black_area_mm2'=>'二値化黒領域（生地）面積(mm²)',
-            'binary_white_percent'=>'二値化白領域率(%)','binary_black_percent'=>'二値化黒領域率(%)',
+            'binary_white_area_mm2'=>'二値化白領域（空洞）面積 mm²',
+            'binary_black_area_mm2'=>'二値化黒領域（生地）面積 mm²',
+            'binary_white_percent'=>'二値化白領域率 %','binary_black_percent'=>'二値化黒領域率 %',
             'median_hole_area_mm2'=>'空洞面積中央値(mm²)','max_hole_area_mm2'=>'最大空洞面積(mm²)',
             'mean_eq_diameter_mm'=>'平均円相当直径(mm)','small_hole_count'=>'小空洞数',
             'medium_hole_count'=>'中空洞数','large_hole_count'=>'大空洞数'
@@ -649,6 +649,12 @@ try {
         $st->execute([$sid]);
         $item=$st->fetch();
         if(!$item) respond(['ok'=>false,'error'=>'サンプルがありません。'],404);
+        $item['binary_area_image_path'] = null;
+        $resultFile = basename((string)($item['result_image_path'] ?? ''));
+        if (preg_match('/^(.+)_overlay\.png$/', $resultFile, $match)) {
+            $candidate = 'uploads/intermediate/' . $match[1] . '_binary_area.png';
+            if (is_file(__DIR__ . '/' . $candidate)) $item['binary_area_image_path'] = $candidate;
+        }
         respond(['ok'=>true,'item'=>$item]);
     }
 
