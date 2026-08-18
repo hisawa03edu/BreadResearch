@@ -1,9 +1,6 @@
 name: Deploy to Xserver
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 concurrency:
@@ -21,20 +18,61 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Prepare SSH key
+      - name: Prepare and test SSH connection
         shell: bash
         env:
           XSERVER_SSH_KEY: ${{ secrets.XSERVER_SSH_KEY }}
           XSERVER_HOST: ${{ secrets.XSERVER_HOST }}
+          XSERVER_USER: ${{ secrets.XSERVER_USER }}
           XSERVER_PORT: ${{ secrets.XSERVER_PORT }}
         run: |
           set -euo pipefail
-          mkdir -p ~/.ssh
-          printf '%s\n' "$XSERVER_SSH_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
+
+          if [ -z "${XSERVER_SSH_KEY:-}" ]; then
+            echo "::error::XSERVER_SSH_KEY is empty."
+            exit 10
+          fi
+          if [ -z "${XSERVER_HOST:-}" ]; then
+            echo "::error::XSERVER_HOST is empty."
+            exit 11
+          fi
+          if [ -z "${XSERVER_USER:-}" ]; then
+            echo "::error::XSERVER_USER is empty."
+            exit 12
+          fi
 
           PORT="${XSERVER_PORT:-10022}"
-          ssh-keyscan -p "$PORT" -H "$XSERVER_HOST" >> ~/.ssh/known_hosts
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$XSERVER_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          : > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+          echo "Testing SSH connection to configured Xserver host on the configured port..."
+          success=0
+          for attempt in 1 2 3; do
+            echo "SSH attempt ${attempt}/3"
+            if ssh \
+              -i ~/.ssh/id_ed25519 \
+              -p "$PORT" \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=accept-new \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              -o ConnectTimeout=20 \
+              -o ConnectionAttempts=1 \
+              "${XSERVER_USER}@${XSERVER_HOST}" \
+              'echo "SSH connection OK"; echo "HOME=$HOME"'; then
+              success=1
+              break
+            fi
+            sleep 5
+          done
+
+          if [ "$success" -ne 1 ]; then
+            echo "::error::Could not establish SSH connection after 3 attempts. Check XSERVER_HOST, XSERVER_USER, XSERVER_PORT, Xserver SSH access settings, and the registered public/private key pair."
+            exit 13
+          fi
 
       - name: Validate deployment path
         shell: bash
@@ -52,20 +90,22 @@ jobs:
             echo "::error::XSERVER_PATH is empty or '/'. Deployment to the server root is blocked for safety."
             echo "Searching the Xserver account for BreadResearch-specific files..."
             ssh -i ~/.ssh/id_ed25519 -p "$PORT" \
+              -o BatchMode=yes -o StrictHostKeyChecking=yes \
               "${XSERVER_USER}@${XSERVER_HOST}" \
               'echo "HOME=$HOME"; \
                echo "--- BreadResearch candidates: python/analyze.py ---"; \
                find "$HOME" -type f -path "*/python/analyze.py" 2>/dev/null | sed "s#/python/analyze.py$##" | head -30 || true; \
                echo "--- BreadResearch candidates: parameter_manual.php ---"; \
                find "$HOME" -type f -name parameter_manual.php 2>/dev/null | sed "s#/parameter_manual.php$##" | head -30 || true; \
-               echo "--- BreadResearch candidates: migration_v6_to_v7.sql ---"; \
-               find "$HOME" -type f -name migration_v6_to_v7.sql 2>/dev/null | sed "s#/migration_v6_to_v7.sql$##" | head -30 || true; \
+               echo "--- BreadResearch candidates: migration_v10_4_to_v10_5.sql ---"; \
+               find "$HOME" -type f -name migration_v10_4_to_v10_5.sql 2>/dev/null | sed "s#/migration_v10_4_to_v10_5.sql$##" | head -30 || true; \
                echo "--- Directories containing both api.php and index.php ---"; \
                find "$HOME" -type f -name api.php 2>/dev/null | while read f; do d=$(dirname "$f"); [ -f "$d/index.php" ] && echo "$d"; done | head -50 || true'
             exit 2
           fi
 
           ssh -i ~/.ssh/id_ed25519 -p "$PORT" \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes \
             "${XSERVER_USER}@${XSERVER_HOST}" \
             "if [ ! -d '$TARGET' ]; then echo '::error::XSERVER_PATH does not exist: $TARGET'; exit 3; fi; if [ ! -w '$TARGET' ]; then echo '::error::XSERVER_PATH is not writable: $TARGET'; exit 4; fi; echo 'Deployment path OK: $TARGET'"
 
@@ -88,7 +128,7 @@ jobs:
             --exclude='uploads/' \
             --exclude='logs/' \
             --exclude='*.log' \
-            -e "ssh -i ~/.ssh/id_ed25519 -p $PORT" \
+            -e "ssh -i ~/.ssh/id_ed25519 -p $PORT -o BatchMode=yes -o StrictHostKeyChecking=yes" \
             ./ "${XSERVER_USER}@${XSERVER_HOST}:${TARGET}/"
 
       - name: Verify deployed version
@@ -104,5 +144,6 @@ jobs:
           TARGET="${XSERVER_PATH%/}"
 
           ssh -i ~/.ssh/id_ed25519 -p "$PORT" \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes \
             "${XSERVER_USER}@${XSERVER_HOST}" \
             "cd '$TARGET' && test -f index.php && test -f api.php && test -f python/analyze.py && echo 'Deploy verification OK'"
