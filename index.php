@@ -288,8 +288,9 @@ if (file_exists($configFile)) {
     </div>
     <div id="savedAnalysisMeta"></div>
     <div id="savedAnalysisMetrics" class="metric-grid"></div>
+    <div class="image-visibility-toolbar"><label class="inline-check"><input id="savedOriginalToggle" class="original-visibility-toggle" type="checkbox"> 元画像を表示</label></div>
     <div class="result-grid">
-      <figure>
+      <figure id="savedOriginalFigure" class="original-result-figure hidden">
         <img id="savedOriginalImage" alt="保存済み元画像">
         <figcaption>元画像</figcaption>
       </figure>
@@ -305,10 +306,11 @@ if (file_exists($configFile)) {
       </figure>
       <figure id="savedBinaryFigure" class="result-comparison hidden">
         <div class="result-view-controls">
+          <label class="result-opacity-control">二値化画像の濃度 <input id="savedBinaryOpacity" class="result-opacity-range" type="range" min="0" max="100" value="60"><output id="savedBinaryOpacityValue">60%</output></label>
           <label class="result-zoom-control">表示倍率 <input id="savedBinaryZoom" class="result-zoom-range" type="range" min="25" max="300" step="5" value="100"><output id="savedBinaryZoomValue">100%</output></label>
         </div>
-        <div class="result-zoom-viewport"><div id="savedBinaryStage" class="result-overlay-stage"><img id="savedBinaryImage" class="result-base-image" alt="保存済み二値化画像"></div></div>
-        <figcaption>二値化画像（白＝空洞・黒＝生地・灰＝解析範囲外）</figcaption>
+        <div class="result-zoom-viewport"><div id="savedBinaryStage" class="result-overlay-stage"><canvas id="savedBinaryBaseCanvas" class="result-base-image"></canvas><img id="savedBinaryImage" class="result-overlay-image" alt="保存済み二値化画像" style="opacity:.6"></div></div>
+        <figcaption>二値化画像（元画像＋二値化オーバーレイ／白＝空洞・黒＝生地・灰＝解析範囲外）</figcaption>
       </figure>
     </div>
     <details open>
@@ -373,6 +375,6 @@ if (file_exists($configFile)) {
 
 <canvas id="workCanvas" class="hidden"></canvas>
 <script defer src="assets/vendor/xlsx.full.min.js"></script>
-<script defer src="assets/app.js?v=10.6.0-view2"></script>
+<script defer src="assets/app.js?v=10.6.0-view3"></script>
 </body>
 </html>
