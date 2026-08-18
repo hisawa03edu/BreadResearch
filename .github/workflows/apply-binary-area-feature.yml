@@ -22,16 +22,14 @@ jobs:
           ref: feature/binary-area-metrics
           fetch-depth: 0
 
-      - name: Apply staged patch
+      - name: Apply verified source updates
         shell: bash
         run: |
           set -euo pipefail
-          PATCH=.feature-patches/binary-area-metrics.patch
-          test -f "$PATCH"
-          git apply --check "$PATCH"
-          git apply "$PATCH"
-          rm -f "$PATCH"
-          rmdir .feature-patches 2>/dev/null || true
+          SCRIPT=.feature-patches/apply_binary_area_metrics.py
+          test -f "$SCRIPT"
+          python3 "$SCRIPT"
+          rm -rf .feature-patches
 
       - name: Static checks
         shell: bash
@@ -45,6 +43,7 @@ jobs:
           fi
           grep -Fq 'binary_white_area_mm2' python/analyze.py
           grep -Fq 'binary_black_area_mm2' api.php
+          grep -Fq 'binary_white_percent' assets/app.js
           grep -Fq 'migration_v10_5_5_to_v10_6.sql' .github/workflows/deploy-xserver.yml
           grep -Fq 'Version 10.6.0' README.md
 
