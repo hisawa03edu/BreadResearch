@@ -36,6 +36,31 @@ jobs:
           PORT="${XSERVER_PORT:-10022}"
           ssh-keyscan -p "$PORT" -H "$XSERVER_HOST" >> ~/.ssh/known_hosts
 
+      - name: Validate deployment path
+        shell: bash
+        env:
+          XSERVER_HOST: ${{ secrets.XSERVER_HOST }}
+          XSERVER_USER: ${{ secrets.XSERVER_USER }}
+          XSERVER_PORT: ${{ secrets.XSERVER_PORT }}
+          XSERVER_PATH: ${{ secrets.XSERVER_PATH }}
+        run: |
+          set -euo pipefail
+          PORT="${XSERVER_PORT:-10022}"
+          TARGET="${XSERVER_PATH%/}"
+
+          if [ -z "$TARGET" ] || [ "$TARGET" = "/" ]; then
+            echo "::error::XSERVER_PATH is empty or '/'. Deployment to the server root is blocked for safety."
+            echo "Remote SSH home and possible application locations:"
+            ssh -i ~/.ssh/id_ed25519 -p "$PORT" \
+              "${XSERVER_USER}@${XSERVER_HOST}" \
+              'echo "HOME=$HOME"; echo "PWD=$(pwd)"; echo "--- index.php candidates under HOME ---"; find "$HOME" -maxdepth 5 -type f -name index.php 2>/dev/null | head -50 || true'
+            exit 2
+          fi
+
+          ssh -i ~/.ssh/id_ed25519 -p "$PORT" \
+            "${XSERVER_USER}@${XSERVER_HOST}" \
+            "if [ ! -d '$TARGET' ]; then echo '::error::XSERVER_PATH does not exist: $TARGET'; exit 3; fi; if [ ! -w '$TARGET' ]; then echo '::error::XSERVER_PATH is not writable: $TARGET'; exit 4; fi; echo 'Deployment path OK: $TARGET'"
+
       - name: Deploy application files
         shell: bash
         env:
@@ -46,6 +71,7 @@ jobs:
         run: |
           set -euo pipefail
           PORT="${XSERVER_PORT:-10022}"
+          TARGET="${XSERVER_PATH%/}"
 
           rsync -azv \
             --exclude='.git/' \
@@ -55,7 +81,7 @@ jobs:
             --exclude='logs/' \
             --exclude='*.log' \
             -e "ssh -i ~/.ssh/id_ed25519 -p $PORT" \
-            ./ "${XSERVER_USER}@${XSERVER_HOST}:${XSERVER_PATH%/}/"
+            ./ "${XSERVER_USER}@${XSERVER_HOST}:${TARGET}/"
 
       - name: Verify deployed version
         shell: bash
@@ -67,7 +93,8 @@ jobs:
         run: |
           set -euo pipefail
           PORT="${XSERVER_PORT:-10022}"
+          TARGET="${XSERVER_PATH%/}"
 
           ssh -i ~/.ssh/id_ed25519 -p "$PORT" \
             "${XSERVER_USER}@${XSERVER_HOST}" \
-            "cd '${XSERVER_PATH%/}' && test -f index.php && test -f api.php && test -f python/analyze.py && echo 'Deploy verification OK'"
+            "cd '$TARGET' && test -f index.php && test -f api.php && test -f python/analyze.py && echo 'Deploy verification OK'"
