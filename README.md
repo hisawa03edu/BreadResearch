@@ -1,6 +1,57 @@
-# Bread Research Analyzer Version 10.4
+# Bread Research Analyzer Version 10.5.5
 
 Xserver共有サーバー上のPython版OpenCVを利用する、パン断面画像解析・研究支援システムです。
+
+## Version 10.5.5の修正
+
+- 倍率をCSSの割合指定ではなく、表示枠の実幅からピクセル単位で計算する方式へ変更
+- 200%では画像レイヤーの描画幅・高さを実際に2倍へ設定
+- 元画像と解析結果レイヤーへ同一のピクセル寸法を強制して位置ずれを防止
+- 拡大時は画像中央が最初に見えるようスクロール位置を自動調整
+- CSSにもバージョン番号を付け、Xserver更新後に古いCSSが残る問題を防止
+
+## Version 10.5.4の修正
+
+- 表示倍率変更時に黒い外枠だけが広がり、画像自体が拡大されない問題を修正
+- 元画像を実寸表示の基準要素とし、元画像と解析結果レイヤーを同じ倍率で拡大
+- 結果表示枠の幅を固定し、拡大した画像だけを縦横スクロールする方式へ変更
+- 解析結果の画像比率を維持し、拡大時の位置ずれを防止
+
+## Version 10.5.3の追加機能
+
+- 解析結果画像へ25～300%の表示倍率スライダーを追加
+- 拡大時は表示領域を縦横スクロールして細部を確認可能
+- 縮小時は結果画像を中央へ配置
+- 透明度と表示倍率を各解析結果ごとに独立して調整
+- 保存済み解析の表示にも同じ拡大縮小機能を追加
+
+## Version 10.5.2の追加機能
+
+- 解析直後の結果指標を日本語名と単位で表示
+- 空洞数とサイズ別空洞数を整数表示
+- 解析途中画像の工程名を日本語表示
+- 結果画像へ「検出結果の濃度」スライダーを追加
+- 0%で解析範囲の元画像、100%で従来の結果画像を表示
+- 保存済み解析の表示にも同じ透明度調整を追加
+
+## Version 10.5.1の修正
+
+- パン輪郭マスクの黒い背景まで緑色で表示され、ブラシ修正が見えなかった問題を修正
+- 「背景として削除」は透明化、「パン領域を追加」は白マスク追加として即時表示
+- ブラシ半径を2～200 pxへ強制的に補正し、直接入力で巨大値を指定できる問題を修正
+- マウス、ペン、タッチ操作中のスクロール干渉を抑制
+
+## Version 10.5の追加機能
+
+- Python OpenCVのGrabCutと最大連結領域により、背景とパンの境界を自動検出
+- 検出したパン領域をブラシで追加・削除して手動修正
+- 修正済み輪郭マスクの画素数とDPIからパン断面積を計算
+- 気泡解析範囲を「パン輪郭内」と従来の「矩形ROI」から選択
+- パン輪郭の内側だけで気泡を抽出し、境界付近の背景誤検出を抑制
+- 修正済みマスクを解析データと一緒に保存し、再解析時に復元
+- 中間画像へ解析範囲マスクを追加
+
+パン輪郭内モードでは一度に1画像を処理します。緑色で表示される自動検出範囲を確認し、必要に応じて「パン領域を追加」「背景として削除」で修正してから解析します。パン面積は輪郭マスク全体、気泡は輪郭から`境界除外幅`だけ内側の範囲で計測します。
 
 ## Version 10.4の追加機能
 
@@ -67,28 +118,30 @@ Xserver共有サーバー上のPython版OpenCVを利用する、パン断面画�
 - OpenCV 4.5.5.64（`cv2.__version__` は 4.5.5）
 - Python仮想環境: `/home/a-pages/python/venv`
 
-## Version 10の解析構成
+## Version 10.5の解析構成
 
-ブラウザで画像とROIを準備し、`api.php?action=analyze_python`へ送信します。PHPは一時画像を保存して、次のPythonを実行します。
+ブラウザで画像とROIまたは修正済みパン輪郭マスクを準備し、`api.php?action=analyze_python`へ送信します。PHPは一時画像を保存して、次のPythonを実行します。
 
 ```text
 /home/a-pages/python/venv/bin/python python/analyze.py
 ```
 
-PythonはCLAHE、Gaussian Blur、Adaptive Threshold、Morphology、Distance Transform、Connected Components、Watershed、輪郭抽出を行い、JSONと解析画像を返します。PHPは解析結果、パラメータ、ROI、アルゴリズム版をMySQLへ保存します。
+パン輪郭の自動検出は`api.php?action=detect_bread`から同じPythonを呼び出します。PythonはGrabCut、最大連結領域、Morphologyで輪郭マスクを生成します。気泡解析ではCLAHE、Gaussian Blur、Adaptive Threshold、Morphology、Distance Transform、Connected Components、Watershed、輪郭抽出を行い、JSONと解析画像を返します。PHPは解析結果、パラメータ、ROI、修正済みパン輪郭マスク、アルゴリズム版をMySQLへ保存します。
 
 OpenCV.jsとWeb WorkerはVersion 10では使用しません。`assets/opencv-worker.js`はVersion 9.1からの参照用として同梱していますが、削除してもVersion 10は動作します。
 
 ## Xserverへの更新方法
 
 1. 現在のWebアプリとデータベースをバックアップします。
-2. Version 10.1のファイルをWebアプリの設置先へ上書きします。
-3. 既存の`config.php`、`uploads/original`、`uploads/result`は削除しないでください。
-4. `config.sample.php`を参考に、既存の`config.php`へ`python`設定を追加します。
-5. ログイン後、「画像解析」画面の「Python環境を再診断」を押します。
-6. Python 3.6.8、OpenCV 4.5.5、NumPy 1.19.5が表示されたら解析できます。
+2. phpMyAdminで対象DBを選択し、`migration_v10_4_to_v10_5.sql`を実行します。
+3. Version 10.5のファイルをWebアプリの設置先へ上書きします。
+4. 既存の`config.php`と`uploads`以下の画像は削除しないでください。
+5. 既存の`config.php`で`app_version`を`10.5.5`へ変更します。Python設定がなければ`config.sample.php`を参考に追加します。
+6. `uploads/intermediate`へPHPから書き込めることを確認します。
+7. ログイン後、「画像解析」画面の「Python環境を再診断」を押します。
+8. Python 3.6.8、OpenCV 4.5.5、NumPy 1.19.5が表示されたら、まず1画像で輪郭検出と保存を確認します。
 
-Version 10から10.1へ更新する場合は、少なくとも次のファイルを転送してください。データベース変更はありません。
+Version 10.4から10.5へ更新する場合は、次のファイルを転送してください。
 
 - `api.php`
 - `index.php`
@@ -96,6 +149,9 @@ Version 10から10.1へ更新する場合は、少なくとも次のファイル
 - `assets/style.css`
 - `assets/vendor/xlsx.full.min.js`
 - `assets/vendor/LICENSE-xlsx.txt`
+- `python/analyze.py`
+- `parameter_manual.php`
+- `migration_v10_4_to_v10_5.sql`（サーバーへ置く必要はなく、phpMyAdminで実行）
 
 ## 任意データを選んで統計処理する手順
 
@@ -110,7 +166,7 @@ Version 10から10.1へ更新する場合は、少なくとも次のファイル
 追加する設定は次のとおりです。
 
 ```php
-'app_version' => '10.4.0',
+'app_version' => '10.5.5',
 'python' => [
     'binary' => '/home/a-pages/python/venv/bin/python',
     'script' => __DIR__ . '/python/analyze.py',
@@ -139,13 +195,14 @@ Webアプリの設置ディレクトリへ移動して、次を実行します�
 
 ## データベース
 
-Version 9.1と同じテーブルを使用するため、Version 9.1からの更新では追加SQLは不要です。新規設置の場合だけ`schema.sql`を実行してください。
+Version 10.4からの更新では、`samples.bread_mask_path`を追加する`migration_v10_4_to_v10_5.sql`の実行が必須です。新規設置では、この列を含む`schema.sql`を実行してください。マイグレーションを実行する前に新しい`api.php`へ差し替えると、保存時にSQLエラーになります。
 
 解析条件の`parameter_json`には次の情報も記録されます。
 
 - `engine`: Python OpenCV 4.5.5
-- `algorithm_version`: 10.0.0-python
-- `scale`: ROI画像の解析縮小率
+- `algorithm_version`: 10.5.0-python
+- `analysis_scope`: `rectangle`または`bread`
+- `scale`: ROIまたは全体画像の解析縮小率
 
 ## PHP実行機能について
 

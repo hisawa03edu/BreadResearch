@@ -12,7 +12,8 @@ textarea{min-height:70px}.span2{grid-column:span 2}button{border:1px solid #b8c1
 button:disabled{opacity:.55;cursor:not-allowed}.hidden{display:none!important}.center-card{max-width:420px;margin:12vh auto;background:white;padding:28px;border:1px solid var(--line);border-radius:12px}
 .center-card input,.center-card button{margin-top:12px}.error{color:#b91c1c;margin-top:10px}.notice{padding:10px;border-radius:7px;background:#fff7d6;margin:8px 0}
 .table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid var(--line);padding:7px;white-space:nowrap;text-align:right}th{background:#eef2f6}th:first-child,td:first-child{text-align:left}
-.result-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.result-grid img{width:100%;max-height:480px;object-fit:contain;background:#222}.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}.metric{background:#eef5fb;padding:10px;border-radius:7px}
+.result-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.result-grid>*{min-width:0}.result-grid figure{margin:0}.result-grid figcaption{text-align:center;padding:5px;font-size:13px}.result-grid>img,.result-grid>figure>img{width:100%;max-height:480px;object-fit:contain;background:#222}.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}.metric{background:#eef5fb;padding:10px;border-radius:7px}
+.result-view-controls{display:grid;gap:6px;margin-bottom:7px}.result-comparison{min-width:0;max-width:100%}.result-opacity-control,.result-zoom-control{display:grid;grid-template-columns:auto minmax(140px,1fr) 48px;align-items:center;gap:9px;font-weight:600}.result-opacity-control input,.result-zoom-control input{padding:0}.result-opacity-control output,.result-zoom-control output{text-align:right;font-variant-numeric:tabular-nums}.result-zoom-viewport{display:block;width:100%;max-width:100%;height:520px;min-width:0;overflow:scroll;background:#222;border:1px solid #ccd3da}.result-overlay-stage{position:relative;display:block;width:100%;aspect-ratio:var(--result-aspect,4/3);overflow:hidden;background:#222}.result-overlay-stage.zoom-reduced{margin-left:auto;margin-right:auto}.result-overlay-stage .result-base-image,.result-overlay-stage .result-overlay-image{position:absolute!important;inset:0;display:block;width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;object-fit:fill!important;background:transparent}.result-overlay-stage .result-overlay-image{transition:opacity .08s linear}
 .chart-box{height:430px;margin:20px 0;overflow-x:auto;background:#fff;border:1px solid var(--line);border-radius:8px}
 .chart-box canvas{display:block;min-width:620px}
 @media(max-width:900px){.grid2,.form-grid,.result-grid{grid-template-columns:1fr}.span2{grid-column:auto}.metric-grid{grid-template-columns:1fr 1fr}nav{overflow:auto}}
@@ -30,7 +31,7 @@ button:disabled{opacity:.55;cursor:not-allowed}.hidden{display:none!important}.c
 .paper-graph{background:white;padding:15px;border:1px solid var(--line);margin-top:12px}
 .history-badge{padding:2px 7px;border-radius:10px;background:#eef2f6}
 
-#analysisStatus{background:#e8f5e9}.result-grid img{border:1px solid #ccd3da}
+#analysisStatus{background:#e8f5e9}.result-grid>img,.result-grid>figure>img{border:1px solid #ccd3da}
 
 .roi-controls{
   display:grid;
@@ -40,6 +41,7 @@ button:disabled{opacity:.55;cursor:not-allowed}.hidden{display:none!important}.c
   margin:12px 0;
 }
 .roi-controls button{height:40px}
+.scope-selector{max-width:420px;margin:10px 0}.bread-mask-controls{margin-top:14px;padding:12px;background:#eef7f0;border:1px solid #bdd8c4;border-radius:8px}.mask-toolbar{display:flex;align-items:end;gap:8px;flex-wrap:wrap;margin:10px 0}.mask-toolbar label{max-width:150px}.mask-toolbar button.active{background:#1769aa;color:#fff}.bread-mask-stage{position:relative;display:inline-block;max-width:100%;overflow:auto;background:#222;line-height:0}.bread-mask-stage canvas{display:block;max-width:none}.bread-mask-stage #breadMaskOverlayCanvas{position:absolute;left:0;top:0;cursor:crosshair;opacity:.45;touch-action:none;user-select:none}
 #roiCanvas{cursor:grab;user-select:none}
 .small-note{font-size:12px;color:#5f6b76}
 @media(max-width:900px){

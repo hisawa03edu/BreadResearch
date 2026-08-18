@@ -150,7 +150,7 @@ function validateAnalysisResult(array $analysis): void {
         }
     }
 }
-function insertAnalysis(PDO $pdo, array $config, array $input, ?string $originalPath, ?string $resultPath): array {
+function insertAnalysis(PDO $pdo, array $config, array $input, ?string $originalPath, ?string $resultPath, ?string $breadMaskPath = null): array {
     $required = ['experiment_id','treatment_id','sample_code','dpi','summary','parameters'];
     foreach ($required as $key) if (!array_key_exists($key, $input)) throw new InvalidArgumentException("不足項目: {$key}");
     $processedAt = date('Y-m-d H:i:s');
@@ -163,8 +163,8 @@ function insertAnalysis(PDO $pdo, array $config, array $input, ?string $original
         processed_at,dpi,parameter_json,bread_area_mm2,hole_count,hole_area_mm2,
         porosity_percent,mean_hole_area_mm2,median_hole_area_mm2,max_hole_area_mm2,
         mean_eq_diameter_mm,small_hole_count,medium_hole_count,large_hole_count,
-        original_image_path,result_image_path,app_version,parent_sample_id,revision_no,roi_json
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+        original_image_path,result_image_path,bread_mask_path,app_version,parent_sample_id,revision_no,roi_json
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
     $st = $pdo->prepare($sql);
     $st->execute([
         (int)$input['experiment_id'], (int)$input['treatment_id'], (string)$input['sample_code'],
@@ -178,7 +178,7 @@ function insertAnalysis(PDO $pdo, array $config, array $input, ?string $original
         (float)$s['median_hole_area_mm2'], (float)$s['max_hole_area_mm2'],
         (float)$s['mean_eq_diameter_mm'], (int)$s['small_hole_count'],
         (int)$s['medium_hole_count'], (int)$s['large_hole_count'],
-        $originalPath, $resultPath, $config['app_version'],
+        $originalPath, $resultPath, $breadMaskPath, $config['app_version'],
         ($input['parent_sample_id'] ?? null) ?: null, (int)($input['revision_no'] ?? 1),
         json_encode($input['roi'] ?? null, JSON_UNESCAPED_UNICODE)
     ]);
@@ -644,6 +644,32 @@ try {
         respond(['ok' => true, 'engine' => $diagnostic]);
     }
 
+    if ($action === 'detect_bread') {
+        if (empty($input['analysis_image'])) respond(['ok'=>false,'error'=>'輪郭検出用画像がありません。'],422);
+        $parameters = is_array($input['parameters'] ?? null) ? $input['parameters'] : [];
+        $tmpDir = __DIR__ . '/uploads/tmp';
+        if (!is_dir($tmpDir) && !mkdir($tmpDir, 0755, true) && !is_dir($tmpDir)) throw new RuntimeException('一時保存ディレクトリを作成できません。');
+        $inputPath = saveDataUrlAbsolute((string)$input['analysis_image'], $tmpDir, 'bread_source');
+        $maskPath = $tmpDir . '/bread_preview_' . bin2hex(random_bytes(6)) . '.png';
+        $response = null;
+        try {
+            $diagnostic = runPython($config, [
+                '--detect-bread', '--input', $inputPath, '--mask-output', $maskPath,
+                '--parameters-json', json_encode($parameters, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            ]);
+            if (!is_file($maskPath)) throw new RuntimeException('パン輪郭マスクが生成されませんでした。');
+            $maskData = file_get_contents($maskPath);
+            if ($maskData === false) throw new RuntimeException('パン輪郭マスクを読み込めません。');
+            $response = ['ok'=>true,'mask'=>'data:image/png;base64,' . base64_encode($maskData),
+                'width'=>$diagnostic['width'] ?? null,'height'=>$diagnostic['height'] ?? null,
+                'area_pixels'=>$diagnostic['area_pixels'] ?? null];
+        } finally {
+            if (is_file($inputPath)) @unlink($inputPath);
+            if (is_file($maskPath)) @unlink($maskPath);
+        }
+        respond($response ?? ['ok'=>false,'error'=>'パン輪郭を検出できませんでした。'], $response ? 200 : 500);
+    }
+
     if ($action === 'analyze_python') {
         foreach (['experiment_id','treatment_id','sample_code','dpi','parameters','analysis_image','original_image'] as $key) {
             if (!array_key_exists($key, $input)) respond(['ok'=>false,'error'=>"不足項目: {$key}"],422);
@@ -656,15 +682,28 @@ try {
             if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) throw new RuntimeException('画像保存ディレクトリを作成できません。');
         }
         $inputPath = saveDataUrlAbsolute((string)$input['analysis_image'], $tmpDir, 'roi');
+        $analysisScope = (string)($input['parameters']['analysis_scope'] ?? 'rectangle');
+        $breadMaskPath = null;
+        $breadMaskAbsolute = null;
+        if ($analysisScope === 'bread') {
+            $breadMaskPath = saveDataUrl((string)($input['bread_mask'] ?? ''), $intermediateDir, 'bread_mask');
+            if ($breadMaskPath === null) {
+                if (is_file($inputPath)) @unlink($inputPath);
+                respond(['ok'=>false,'error'=>'パン輪郭を自動検出し、必要に応じて修正してから解析してください。'],422);
+            }
+            $breadMaskAbsolute = __DIR__ . '/' . $breadMaskPath;
+        }
         $prefix = 'analysis_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4));
         try {
-            $analysis = runPython($config, [
+            $pythonArguments = [
                 '--input', $inputPath,
                 '--output-dir', $resultDir,
                 '--intermediate-dir', $intermediateDir,
                 '--parameters-json', json_encode($input['parameters'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 '--prefix', $prefix,
-            ]);
+            ];
+            if ($breadMaskAbsolute !== null) { $pythonArguments[]='--measurement-mask'; $pythonArguments[]=$breadMaskAbsolute; }
+            $analysis = runPython($config, $pythonArguments);
         } finally {
             if (is_file($inputPath)) @unlink($inputPath);
         }
@@ -675,8 +714,8 @@ try {
         $input['summary'] = $analysis['summary'] ?? [];
         $input['holes'] = $analysis['holes'] ?? [];
         $input['parameters']['engine'] = 'Python OpenCV 4.5.5';
-        $input['parameters']['algorithm_version'] = $analysis['engine']['algorithm_version'] ?? '10.2.1-python';
-        $saved = insertAnalysis($pdo, $config, $input, $originalPath, $resultPath);
+        $input['parameters']['algorithm_version'] = $analysis['engine']['algorithm_version'] ?? '10.5.0-python';
+        $saved = insertAnalysis($pdo, $config, $input, $originalPath, $resultPath, $breadMaskPath);
         $intermediates = [];
         foreach (($analysis['intermediates'] ?? []) as $name => $fileName) {
             $intermediates[$name] = resultPublicPath($intermediateDir, $fileName);
@@ -688,6 +727,7 @@ try {
             'summary' => $input['summary'],
             'holes' => $input['holes'],
             'result_image_path' => $resultPath,
+            'bread_mask_path' => $breadMaskPath,
             'intermediates' => $intermediates,
             'engine' => $analysis['engine'] ?? null,
         ]);
@@ -696,7 +736,7 @@ try {
     if ($action === 'save_analysis') {
         $originalPath = saveDataUrl((string)($input['original_image'] ?? ''), __DIR__.'/uploads/original', 'original');
         $resultPath = saveDataUrl((string)($input['result_image'] ?? ''), __DIR__.'/uploads/result', 'result');
-        $saved = insertAnalysis($pdo, $config, $input, $originalPath, $resultPath);
+        $saved = insertAnalysis($pdo, $config, $input, $originalPath, $resultPath, null);
         respond(['ok' => true, 'sample_id' => $saved['sample_id'], 'processed_at' => $saved['processed_at']]);
     }
 
@@ -718,11 +758,11 @@ try {
 
     if ($action === 'delete_sample') {
         $sid = (int)($input['sample_id'] ?? 0);
-        $st = $pdo->prepare("SELECT original_image_path,result_image_path FROM samples WHERE id=?");
+        $st = $pdo->prepare("SELECT original_image_path,result_image_path,bread_mask_path FROM samples WHERE id=?");
         $st->execute([$sid]);
         $row = $st->fetch();
         if ($row) {
-            foreach (['original_image_path','result_image_path'] as $k) {
+            foreach (['original_image_path','result_image_path','bread_mask_path'] as $k) {
                 if (!empty($row[$k])) {
                     $path = __DIR__ . '/' . $row[$k];
                     if (is_file($path)) @unlink($path);

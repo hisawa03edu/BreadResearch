@@ -11,7 +11,7 @@ if (file_exists($configFile)) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title><?= htmlspecialchars($appName, ENT_QUOTES, 'UTF-8') ?></title>
-<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/style.css?v=10.5.5">
 </head>
 <body>
 <div id="loginView" class="center-card hidden">
@@ -24,7 +24,7 @@ if (file_exists($configFile)) {
 
 <div id="appView" class="hidden">
 <header>
-  <div><h1><?= htmlspecialchars($appName, ENT_QUOTES, 'UTF-8') ?></h1><small>PHP + MySQL + Python OpenCV Version 10.4</small></div>
+  <div><h1><?= htmlspecialchars($appName, ENT_QUOTES, 'UTF-8') ?></h1><small>PHP + MySQL + Python OpenCV Version 10.5.5</small></div>
   <button id="logoutButton">ログアウト</button>
 </header>
 
@@ -172,10 +172,10 @@ if (file_exists($configFile)) {
   </details>
 
   <div class="card">
-    <h2>ROI（解析領域）</h2>
+    <h2>解析範囲・ROI</h2>
+    <div class="scope-selector"><label>気泡を調べる範囲<select id="analysisScope"><option value="rectangle" selected>矩形ROI（従来方式）</option><option value="bread">パン輪郭内（パン面積を自動計測）</option></select></label></div>
     <p>
-      ROIの幅（W）と高さ（H）を指定し、画像上で矩形をドラッグして位置を移動します。
-      矩形内だけを解析するため、すべてのサンプルを同じ面積で比較できます。
+      矩形ROIでは従来どおり一定範囲を比較します。パン輪郭内では背景とパンの境界を自動検出し、手動修正した輪郭内だけを解析します。
     </p>
     <div class="roi-controls">
       <label>ROI幅 W（px）
@@ -201,6 +201,20 @@ if (file_exists($configFile)) {
       黄色い矩形の内側をドラッグすると、W・Hを変えずに位置だけ移動します。
       W・HまたはX・Yを変更した場合は「数値を反映」を押してください。
     </p>
+    <div id="breadMaskControls" class="bread-mask-controls hidden">
+      <button id="detectBreadMask" class="primary">パン輪郭を自動検出</button>
+      <span id="breadMaskStatus">最初の画像からパン輪郭を検出します。</span>
+      <div id="breadMaskEditor" class="hidden">
+        <div class="mask-toolbar">
+          <button id="breadMaskAdd" class="active">パン領域を追加</button>
+          <button id="breadMaskRemove">背景として削除</button>
+          <label>ブラシ半径(px)<input id="breadMaskBrush" type="number" value="25" min="2" max="200"></label>
+          <button id="resetBreadMask">自動検出へ戻す</button>
+        </div>
+        <div class="bread-mask-stage"><canvas id="breadSourceCanvas"></canvas><canvas id="breadMaskOverlayCanvas"></canvas></div>
+        <p class="small-note">緑色がパン面積として保存される範囲です。ドラッグして追加・削除できます。</p>
+      </div>
+    </div>
   </div>
 
   <div class="card">
@@ -280,8 +294,14 @@ if (file_exists($configFile)) {
         <figcaption>元画像</figcaption>
       </figure>
       <figure>
-        <img id="savedResultImage" alt="保存済み解析画像">
-        <figcaption>解析画像</figcaption>
+        <div class="result-comparison">
+          <div class="result-view-controls">
+            <label class="result-opacity-control">検出結果の濃度 <input id="savedResultOpacity" class="result-opacity-range" type="range" min="0" max="100" value="60"><output id="savedResultOpacityValue">60%</output></label>
+            <label class="result-zoom-control">表示倍率 <input id="savedResultZoom" class="result-zoom-range" type="range" min="25" max="300" step="5" value="100"><output id="savedResultZoomValue">100%</output></label>
+          </div>
+          <div class="result-zoom-viewport"><div id="savedResultOverlayStage" class="result-overlay-stage"><canvas id="savedResultBaseCanvas" class="result-base-image"></canvas><img id="savedResultImage" class="result-overlay-image" alt="保存済み解析画像" style="opacity:.6"></div></div>
+        </div>
+        <figcaption>解析結果（拡大時は画像内をスクロールできます）</figcaption>
       </figure>
     </div>
     <details open>
@@ -342,6 +362,6 @@ if (file_exists($configFile)) {
 
 <canvas id="workCanvas" class="hidden"></canvas>
 <script defer src="assets/vendor/xlsx.full.min.js"></script>
-<script defer src="assets/app.js?v=10.4.0"></script>
+<script defer src="assets/app.js?v=10.5.5"></script>
 </body>
 </html>

@@ -15,6 +15,7 @@ let filteredSamples=[];
 let selectedSampleIds=new Set();
 let selectedExperimentId=null;
 let currentStats=null;
+let breadMaskStateCanvas=null,breadMaskOriginalDataUrl=null,breadMaskPrepared=null,breadMaskEditMode='add';
 let engineReady=false;
 let activeAnalysisController=null;
 let engineDiagnostic=null;
@@ -25,8 +26,8 @@ async function api(action,opt={}){
 }
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const num=id=>Number($(id).value);
-function parameters(){return{dpi:num('dpi'),max_dimension:num('maxDimension'),use_clahe:$('useClahe').value==='1',clahe_clip:num('claheClip'),clahe_tiles:num('claheTiles'),blur_size:num('blurSize'),threshold_mode:$('thresholdMode').value,hole_threshold:num('holeThreshold'),adaptive_block:num('adaptiveBlock'),adaptive_c:num('adaptiveC'),open_size:num('openSize'),close_size:num('closeSize'),use_distance:$('useDistance').value==='1',distance_ratio:num('distanceRatio'),use_watershed:$('useWatershed').value==='1',background_dilate:num('backgroundDilate'),use_large_hole_rescue:$('useLargeHoleRescue').value==='1',large_hole_window:num('largeHoleWindow'),large_hole_contrast:num('largeHoleContrast'),large_hole_min_area_mm2:num('largeHoleMinArea'),large_hole_max_fraction:num('largeHoleMaxFraction')/100,border_margin:num('borderMargin'),min_area_mm2:num('minArea'),max_area_mm2:num('maxArea'),min_circularity:num('minCircularity'),max_aspect_ratio:num('maxAspect'),small_limit_mm:num('smallLimit'),medium_limit_mm:num('mediumLimit'),fill_contours:$('fillContours').value==='1',show_numbers:$('showNumbers').value==='1',save_intermediates:$('saveIntermediates').value==='1'};}
-function setParameters(p){const m={dpi:'dpi',max_dimension:'maxDimension',use_clahe:'useClahe',clahe_clip:'claheClip',clahe_tiles:'claheTiles',blur_size:'blurSize',threshold_mode:'thresholdMode',hole_threshold:'holeThreshold',adaptive_block:'adaptiveBlock',adaptive_c:'adaptiveC',open_size:'openSize',close_size:'closeSize',use_distance:'useDistance',distance_ratio:'distanceRatio',use_watershed:'useWatershed',background_dilate:'backgroundDilate',use_large_hole_rescue:'useLargeHoleRescue',large_hole_window:'largeHoleWindow',large_hole_contrast:'largeHoleContrast',large_hole_min_area_mm2:'largeHoleMinArea',border_margin:'borderMargin',min_area_mm2:'minArea',max_area_mm2:'maxArea',min_circularity:'minCircularity',max_aspect_ratio:'maxAspect',small_limit_mm:'smallLimit',medium_limit_mm:'mediumLimit',fill_contours:'fillContours',show_numbers:'showNumbers',save_intermediates:'saveIntermediates'};Object.entries(m).forEach(([k,id])=>{if(p[k]!=null)$(id).value=typeof p[k]==='boolean'?(p[k]?'1':'0'):p[k]});if(p.large_hole_max_fraction!=null)$('largeHoleMaxFraction').value=Number(p.large_hole_max_fraction)*100;}
+function parameters(){return{analysis_scope:$('analysisScope').value,dpi:num('dpi'),max_dimension:num('maxDimension'),use_clahe:$('useClahe').value==='1',clahe_clip:num('claheClip'),clahe_tiles:num('claheTiles'),blur_size:num('blurSize'),threshold_mode:$('thresholdMode').value,hole_threshold:num('holeThreshold'),adaptive_block:num('adaptiveBlock'),adaptive_c:num('adaptiveC'),open_size:num('openSize'),close_size:num('closeSize'),use_distance:$('useDistance').value==='1',distance_ratio:num('distanceRatio'),use_watershed:$('useWatershed').value==='1',background_dilate:num('backgroundDilate'),use_large_hole_rescue:$('useLargeHoleRescue').value==='1',large_hole_window:num('largeHoleWindow'),large_hole_contrast:num('largeHoleContrast'),large_hole_min_area_mm2:num('largeHoleMinArea'),large_hole_max_fraction:num('largeHoleMaxFraction')/100,border_margin:num('borderMargin'),min_area_mm2:num('minArea'),max_area_mm2:num('maxArea'),min_circularity:num('minCircularity'),max_aspect_ratio:num('maxAspect'),small_limit_mm:num('smallLimit'),medium_limit_mm:num('mediumLimit'),fill_contours:$('fillContours').value==='1',show_numbers:$('showNumbers').value==='1',save_intermediates:$('saveIntermediates').value==='1'};}
+function setParameters(p){const m={analysis_scope:'analysisScope',dpi:'dpi',max_dimension:'maxDimension',use_clahe:'useClahe',clahe_clip:'claheClip',clahe_tiles:'claheTiles',blur_size:'blurSize',threshold_mode:'thresholdMode',hole_threshold:'holeThreshold',adaptive_block:'adaptiveBlock',adaptive_c:'adaptiveC',open_size:'openSize',close_size:'closeSize',use_distance:'useDistance',distance_ratio:'distanceRatio',use_watershed:'useWatershed',background_dilate:'backgroundDilate',use_large_hole_rescue:'useLargeHoleRescue',large_hole_window:'largeHoleWindow',large_hole_contrast:'largeHoleContrast',large_hole_min_area_mm2:'largeHoleMinArea',border_margin:'borderMargin',min_area_mm2:'minArea',max_area_mm2:'maxArea',min_circularity:'minCircularity',max_aspect_ratio:'maxAspect',small_limit_mm:'smallLimit',medium_limit_mm:'mediumLimit',fill_contours:'fillContours',show_numbers:'showNumbers',save_intermediates:'saveIntermediates'};Object.entries(m).forEach(([k,id])=>{if(p[k]!=null)$(id).value=typeof p[k]==='boolean'?(p[k]?'1':'0'):p[k]});if(p.large_hole_max_fraction!=null)$('largeHoleMaxFraction').value=Number(p.large_hole_max_fraction)*100;updateAnalysisScopeUi();}
 
 function setProgressIndeterminate(on){
  const shell=$('progressShell');
@@ -115,10 +116,83 @@ function prepareRoiImage(img,p){
  return {
    // 写真をPNG化すると数十MBになるため、高品質JPEGで解析用ROIを送る。
    analysisDataUrl:c.toDataURL('image/jpeg',0.94),
+   width:w,height:h,
    scale,
    roi:{x:sx,y:sy,w:sw,h:sh}
  };
 }
+function prepareBreadImage(img,p){
+ const scale=Math.min(1,Number(p.max_dimension||1400)/Math.max(img.naturalWidth,img.naturalHeight));
+ const width=Math.max(1,Math.round(img.naturalWidth*scale)),height=Math.max(1,Math.round(img.naturalHeight*scale));
+ const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
+ canvas.getContext('2d').drawImage(img,0,0,width,height);
+ return {analysisDataUrl:canvas.toDataURL('image/jpeg',0.94),width,height,scale,canvas,
+   roi:{mode:'bread',x:0,y:0,w:img.naturalWidth,h:img.naturalHeight}};
+}
+function updateAnalysisScopeUi(){
+ const bread=$('analysisScope').value==='bread';
+ $('breadMaskControls').classList.toggle('hidden',!bread);
+ document.querySelectorAll('.roi-controls,.roi-wrap').forEach(element=>element.style.display=bread?'none':'');
+}
+function renderBreadMaskOverlay(){
+ if(!breadMaskStateCanvas)return;
+ const overlay=$('breadMaskOverlayCanvas');overlay.width=breadMaskStateCanvas.width;overlay.height=breadMaskStateCanvas.height;
+ const context=overlay.getContext('2d');context.clearRect(0,0,overlay.width,overlay.height);
+ context.fillStyle='#00d15b';context.fillRect(0,0,overlay.width,overlay.height);
+ context.globalCompositeOperation='destination-in';context.drawImage(breadMaskStateCanvas,0,0);context.globalCompositeOperation='source-over';
+}
+function normalizeBreadMaskTransparency(canvas){
+ const context=canvas.getContext('2d'),image=context.getImageData(0,0,canvas.width,canvas.height),data=image.data;
+ for(let index=0;index<data.length;index+=4){
+  const selected=data[index]>127;data[index]=selected?255:0;data[index+1]=selected?255:0;data[index+2]=selected?255:0;data[index+3]=selected?255:0;
+ }
+ context.putImageData(image,0,0);
+}
+function breadMaskBrushRadius(){
+ const input=$('breadMaskBrush'),raw=Number(input.value),value=Math.min(200,Math.max(2,Number.isFinite(raw)?raw:25));
+ input.value=String(value);return value;
+}
+function updateBreadMaskArea(){
+ if(!breadMaskStateCanvas||!breadMaskPrepared)return;
+ const data=breadMaskStateCanvas.getContext('2d').getImageData(0,0,breadMaskStateCanvas.width,breadMaskStateCanvas.height).data;
+ let pixels=0;for(let index=0;index<data.length;index+=4)if(data[index]>127)pixels++;
+ const mmPerPixel=(25.4/Math.max(1,num('dpi')))/breadMaskPrepared.scale;
+ $('breadMaskStatus').textContent=`パン領域：${pixels.toLocaleString('ja-JP')} px（約 ${(pixels*mmPerPixel*mmPerPixel).toFixed(1)} mm²）`;
+}
+function setBreadMaskMode(mode){
+ breadMaskEditMode=mode;$('breadMaskAdd').classList.toggle('active',mode==='add');$('breadMaskRemove').classList.toggle('active',mode==='remove');
+}
+async function setupBreadMaskEditor(prepared,maskDataUrl){
+ const source=$('breadSourceCanvas');source.width=prepared.canvas.width;source.height=prepared.canvas.height;source.getContext('2d').drawImage(prepared.canvas,0,0);
+ const maskImage=new Image();await new Promise((resolve,reject)=>{maskImage.onload=resolve;maskImage.onerror=reject;maskImage.src=maskDataUrl;});
+ breadMaskStateCanvas=document.createElement('canvas');breadMaskStateCanvas.width=prepared.canvas.width;breadMaskStateCanvas.height=prepared.canvas.height;
+ const maskContext=breadMaskStateCanvas.getContext('2d');maskContext.drawImage(maskImage,0,0,prepared.canvas.width,prepared.canvas.height);
+ normalizeBreadMaskTransparency(breadMaskStateCanvas);
+ breadMaskOriginalDataUrl=breadMaskStateCanvas.toDataURL('image/png');breadMaskPrepared={width:prepared.canvas.width,height:prepared.canvas.height,scale:prepared.scale};
+ renderBreadMaskOverlay();updateBreadMaskArea();$('breadMaskEditor').classList.remove('hidden');
+}
+async function detectBreadBoundary(){
+ const file=$('imageFiles').files[0]||rerunFile;if(!file)return alert('先に画像を選択してください。');
+ $('breadMaskStatus').textContent='Python OpenCVでパン輪郭を検出しています…';
+ try{
+   const image=await loadImage(file),prepared=prepareBreadImage(image,parameters());
+   const result=await api('detect_bread',{method:'POST',body:{analysis_image:prepared.analysisDataUrl,parameters:parameters()}});
+   await setupBreadMaskEditor(prepared,result.mask);
+ }catch(error){$('breadMaskStatus').textContent='輪郭検出に失敗しました：'+error.message;alert(error.message);}
+}
+$('analysisScope').onchange=updateAnalysisScopeUi;
+$('dpi').addEventListener('input',updateBreadMaskArea);
+$('detectBreadMask').onclick=detectBreadBoundary;
+$('breadMaskAdd').onclick=()=>setBreadMaskMode('add');
+$('breadMaskRemove').onclick=()=>setBreadMaskMode('remove');
+$('breadMaskBrush').addEventListener('change',breadMaskBrushRadius);
+$('resetBreadMask').onclick=async()=>{if(breadMaskOriginalDataUrl&&breadMaskPrepared){const image=new Image();await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=reject;image.src=breadMaskOriginalDataUrl;});const context=breadMaskStateCanvas.getContext('2d');context.clearRect(0,0,breadMaskStateCanvas.width,breadMaskStateCanvas.height);context.drawImage(image,0,0);renderBreadMaskOverlay();updateBreadMaskArea();}};
+{
+ const overlay=$('breadMaskOverlayCanvas');let drawing=false;
+ const paint=event=>{if(!drawing||!breadMaskStateCanvas)return;event.preventDefault();const rect=overlay.getBoundingClientRect(),x=(event.clientX-rect.left)*overlay.width/rect.width,y=(event.clientY-rect.top)*overlay.height/rect.height,radius=breadMaskBrushRadius()*overlay.width/rect.width;const context=breadMaskStateCanvas.getContext('2d');context.save();context.globalCompositeOperation=breadMaskEditMode==='add'?'source-over':'destination-out';context.fillStyle='#fff';context.beginPath();context.arc(x,y,radius,0,Math.PI*2);context.fill();context.restore();renderBreadMaskOverlay();};
+ overlay.onpointerdown=event=>{event.preventDefault();drawing=true;overlay.setPointerCapture(event.pointerId);paint(event);};overlay.onpointermove=paint;overlay.onpointerup=overlay.onpointercancel=()=>{drawing=false;updateBreadMaskArea();};
+}
+$('imageFiles').addEventListener('change',()=>{breadMaskStateCanvas=null;breadMaskOriginalDataUrl=null;breadMaskPrepared=null;$('breadMaskEditor').classList.add('hidden');if($('analysisScope').value==='bread')$('breadMaskStatus').textContent='画像が変わりました。パン輪郭を自動検出してください。';});
 function fileToDataUrl(file){
  return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(new Error('元画像を読み込めません。'));reader.readAsDataURL(file);});
 }
@@ -138,6 +212,7 @@ async function boot(){
  if(st.logged_in){$('appView').classList.remove('hidden');await refreshExperiments();await loadDashboard();await loadPresets();}
  else $('loginView').classList.remove('hidden');
  $('measurementDate').value=new Date().toISOString().slice(0,10);
+ updateAnalysisScopeUi();
 }
 $('loginButton').onclick=async()=>{try{await api('login',{method:'POST',body:{password:$('loginPassword').value}});location.reload()}catch(e){$('loginError').textContent=e.message}};
 $('logoutButton').onclick=async()=>{await api('logout',{method:'POST'});location.reload()};
@@ -291,6 +366,8 @@ $('runAnalysis').onclick=async()=>{
  let files=[...$('imageFiles').files];if(!files.length&&rerunFile)files=[rerunFile];
  if(!files.length)return alert('画像を選択してください');
  if(!$('analysisTreatment').value)return alert('試験区を選択してください');
+ if($('analysisScope').value==='bread'&&files.length!==1)return alert('パン輪郭内の解析は、輪郭確認のため1画像ずつ実行してください。');
+ if($('analysisScope').value==='bread'&&!breadMaskStateCanvas)return alert('「パン輪郭を自動検出」を押し、輪郭を確認・修正してください。');
  $('analysisResults').innerHTML='';
  try{
    await diagnosePython();
@@ -300,7 +377,8 @@ $('runAnalysis').onclick=async()=>{
  for(let i=0;i<files.length;i++){
   const f=files[i];$('analysisProgressBar').style.width='2%';$('analysisProgress').textContent=`${i+1}/${files.length} ${f.name} を準備中`;
   try{
-   const img=await loadImage(f),p=parameters(),prepared=prepareRoiImage(img,p);
+   const img=await loadImage(f),p=parameters(),prepared=p.analysis_scope==='bread'?prepareBreadImage(img,p):prepareRoiImage(img,p);
+   if(p.analysis_scope==='bread'&&(!breadMaskPrepared||breadMaskPrepared.width!==prepared.canvas.width||breadMaskPrepared.height!==prepared.canvas.height))throw new Error('解析画像サイズが変わりました。パン輪郭を再検出してください。');
    prepared.originalDataUrl=await prepareOriginalImageData(img,f);
    p.scale=prepared.scale;
    setWorkerState('解析中','working');
@@ -308,7 +386,7 @@ $('runAnalysis').onclick=async()=>{
    const saved=await runPythonAnalysis({
      experiment_id:$('analysisExperiment').value,treatment_id:$('analysisTreatment').value,
      sample_code:f.name.replace(/\.[^.]+$/,''),original_filename:f.name,dpi:p.dpi,
-     parameters:p,analysis_image:prepared.analysisDataUrl,
+     parameters:p,analysis_image:prepared.analysisDataUrl,bread_mask:p.analysis_scope==='bread'?breadMaskStateCanvas.toDataURL('image/png'):null,
      original_image:prepared.originalDataUrl,roi:prepared.roi,
      parent_sample_id:rerunMeta?rerunMeta.parent:null,revision_no:rerunMeta?rerunMeta.revision:1,
      metadata:{replicate_no:$('replicateNo').value,bread_type:$('breadType').value,
@@ -319,10 +397,10 @@ $('runAnalysis').onclick=async()=>{
    setWorkerState('利用可能','ready');
    const resultUrl=`${saved.result_image_path}?t=${Date.now()}`;
    const intermediateUrls={};Object.entries(saved.intermediates||{}).forEach(([k,v])=>intermediateUrls[k]=`${v}?t=${Date.now()}`);
-   const metrics=Object.entries(saved.summary).map(([k,v])=>`<div class="metric"><b>${esc(k)}</b><br>${Number(v).toFixed(3)}</div>`).join('');
+   const metrics=Object.entries(saved.summary).map(([k,v])=>`<div class="metric"><b>${esc(metricLabel(k))}</b><br>${formatMetricValue(k,v)}</div>`).join('');
    $('analysisResults').insertAdjacentHTML('beforeend',`<div class="card"><h2>${esc(f.name)} <small>${esc(saved.processed_at)}</small></h2>
-    <div class="metric-grid">${metrics}</div><div class="result-grid"><img src="${prepared.originalDataUrl}"><img src="${resultUrl}"></div>
-    ${Object.keys(intermediateUrls).length?`<details><summary>解析途中画像</summary><div class="intermediate-grid">${Object.entries(intermediateUrls).map(([k,u])=>`<figure><img src="${u}"><figcaption>${esc(k)}</figcaption></figure>`).join('')}</div></details>`:''}
+    <div class="metric-grid">${metrics}</div><div class="result-grid"><figure><img src="${prepared.originalDataUrl}" alt="元画像"><figcaption>元画像</figcaption></figure><figure class="result-comparison"><div class="result-view-controls"><label class="result-opacity-control">検出結果の濃度 <input class="result-opacity-range" type="range" min="0" max="100" value="60"><output>60%</output></label><label class="result-zoom-control">表示倍率 <input class="result-zoom-range" type="range" min="25" max="300" step="5" value="100"><output>100%</output></label></div><div class="result-zoom-viewport"><div class="result-overlay-stage" data-image-width="${prepared.width}" data-image-height="${prepared.height}" style="--result-aspect:${prepared.width}/${prepared.height}"><img class="result-base-image" src="${prepared.analysisDataUrl}" alt="解析範囲の元画像"><img class="result-overlay-image" src="${resultUrl}" alt="解析結果" style="opacity:.6"></div></div><figcaption>解析結果（拡大時は画像内をスクロールできます）</figcaption></figure></div>
+    ${Object.keys(intermediateUrls).length?`<details><summary>解析途中画像</summary><div class="intermediate-grid">${Object.entries(intermediateUrls).map(([k,u])=>`<figure><img src="${u}"><figcaption>${esc(intermediateLabel(k))}</figcaption></figure>`).join('')}</div></details>`:''}
     <p class="notice">手動補正は「データ一覧」→「画像・結果」から開けます。</p></div>`);
   }catch(e){
    if(e.name==='AbortError'){
@@ -515,6 +593,40 @@ function metricLabel(k){
  medium_hole_count:'中空洞数',large_hole_count:'大空洞数'};
  return m[k]||k;
 }
+function formatMetricValue(key,value){
+ const number=Number(value||0);return ['hole_count','small_hole_count','medium_hole_count','large_hole_count'].includes(key)?number.toLocaleString('ja-JP',{maximumFractionDigits:0}):number.toLocaleString('ja-JP',{minimumFractionDigits:3,maximumFractionDigits:3});
+}
+function intermediateLabel(key){
+ const labels={gray:'グレースケール',clahe:'CLAHE補正',threshold:'二値化',morphology:'形態処理',measurement_mask:'解析範囲マスク',large_hole_contrast:'大空洞コントラスト',large_hole_mask:'大空洞補完マスク',distance:'距離変換',watershed:'Watershed分割',final_mask:'最終気泡マスク'};return labels[key]||key;
+}
+function applyResultZoom(figure,value){
+ const viewport=figure.querySelector('.result-zoom-viewport'),stage=figure.querySelector('.result-overlay-stage');if(!viewport||!stage)return;
+ const imageWidth=Math.max(1,Number(stage.dataset.imageWidth)||1),imageHeight=Math.max(1,Number(stage.dataset.imageHeight)||1),viewportWidth=Math.max(1,viewport.clientWidth),zoom=value/100;
+ const displayWidth=Math.max(1,Math.round(viewportWidth*zoom)),displayHeight=Math.max(1,Math.round(displayWidth*imageHeight/imageWidth));
+ stage.style.width=`${displayWidth}px`;stage.style.height=`${displayHeight}px`;stage.style.aspectRatio='auto';stage.classList.toggle('zoom-reduced',value<100);
+ requestAnimationFrame(()=>{viewport.scrollLeft=Math.max(0,(stage.offsetWidth-viewport.clientWidth)/2);viewport.scrollTop=Math.max(0,(stage.offsetHeight-viewport.clientHeight)/2);});
+}
+document.addEventListener('input',event=>{
+ const figure=event.target.closest('.result-comparison');if(!figure)return;
+ if(event.target.classList.contains('result-opacity-range')){
+  const value=Math.min(100,Math.max(0,Number(event.target.value)||0)),overlay=figure.querySelector('.result-overlay-image'),output=event.target.closest('label')?.querySelector('output');
+  if(overlay)overlay.style.opacity=String(value/100);if(output)output.textContent=`${value}%`;
+ }
+ if(event.target.classList.contains('result-zoom-range')){
+  const value=Math.min(300,Math.max(25,Number(event.target.value)||100)),output=event.target.closest('label')?.querySelector('output');
+  applyResultZoom(figure,value);if(output)output.textContent=`${value}%`;
+ }
+});
+function loadUrlImage(url){return new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(new Error('比較用画像を読み込めません。'));image.src=url;});}
+async function prepareSavedResultBase(originalUrl,resultUrl,parametersData,roiData){
+ const [original,result]=await Promise.all([loadUrlImage(originalUrl),loadUrlImage(resultUrl)]),canvas=$('savedResultBaseCanvas'),context=canvas.getContext('2d');
+ canvas.width=result.naturalWidth;canvas.height=result.naturalHeight;
+ let source={x:0,y:0,w:original.naturalWidth,h:original.naturalHeight};
+ if((parametersData.analysis_scope||'rectangle')==='rectangle'&&roiData){source={x:Number(roiData.x)||0,y:Number(roiData.y)||0,w:Number(roiData.w)||original.naturalWidth,h:Number(roiData.h)||original.naturalHeight};}
+ source.x=Math.max(0,Math.min(original.naturalWidth-1,source.x));source.y=Math.max(0,Math.min(original.naturalHeight-1,source.y));source.w=Math.max(1,Math.min(original.naturalWidth-source.x,source.w));source.h=Math.max(1,Math.min(original.naturalHeight-source.y,source.h));
+ context.clearRect(0,0,canvas.width,canvas.height);context.drawImage(original,source.x,source.y,source.w,source.h,0,0,canvas.width,canvas.height);
+ const stage=$('savedResultOverlayStage');stage.dataset.imageWidth=String(canvas.width);stage.dataset.imageHeight=String(canvas.height);stage.style.setProperty('--result-aspect',`${canvas.width}/${canvas.height}`);
+}
 window.viewSavedAnalysis=async id=>{
  try{
   const s=(await api('sample',{query:`&sample_id=${id}`})).item;
@@ -527,16 +639,18 @@ window.viewSavedAnalysis=async id=>{
   const keys=['bread_area_mm2','hole_count','hole_area_mm2','porosity_percent',
    'mean_hole_area_mm2','median_hole_area_mm2','max_hole_area_mm2',
    'mean_eq_diameter_mm','small_hole_count','medium_hole_count','large_hole_count'];
-  $('savedAnalysisMetrics').innerHTML=keys.map(k=>`<div class="metric"><b>${metricLabel(k)}</b><br>${Number(s[k]||0).toFixed(3)}</div>`).join('');
-  $('savedOriginalImage').src=`${s.original_image_path}?t=${Date.now()}`;
-  $('savedResultImage').src=`${s.latest_corrected_result_path||s.result_image_path}?t=${Date.now()}`;
+  $('savedAnalysisMetrics').innerHTML=keys.map(k=>`<div class="metric"><b>${metricLabel(k)}</b><br>${formatMetricValue(k,s[k])}</div>`).join('');
+  const originalUrl=`${s.original_image_path}?t=${Date.now()}`,resultUrl=`${s.latest_corrected_result_path||s.result_image_path}?t=${Date.now()}`;
+  $('savedOriginalImage').src=originalUrl;$('savedResultImage').src=resultUrl;$('savedResultImage').style.opacity='.6';$('savedResultOpacity').value='60';$('savedResultOpacityValue').textContent='60%';$('savedResultZoom').value='100';$('savedResultZoomValue').textContent='100%';$('savedResultOverlayStage').style.width='100%';$('savedResultOverlayStage').classList.remove('zoom-reduced');
   let p={};try{p=JSON.parse(s.parameter_json||'{}')}catch(e){}
   let roiData=null;try{roiData=s.roi_json?JSON.parse(s.roi_json):null}catch(e){}
+  await prepareSavedResultBase(originalUrl,resultUrl,p,roiData);
   const rows=[...Object.entries(p),['ROI',roiData?JSON.stringify(roiData):'未指定'],
+   ['パン輪郭マスク',s.bread_mask_path||'なし'],
    ['解析バージョン',s.app_version],['改訂番号',s.revision_no]];
   $('savedParameterTable').innerHTML='<table><tr><th>項目</th><th>保存値</th></tr>'+
    rows.map(([k,v])=>`<tr><td>${esc(k)}</td><td>${esc(typeof v==='object'?JSON.stringify(v):v)}</td></tr>`).join('')+'</table>';
-  panel.classList.remove('hidden');panel.scrollIntoView({behavior:'smooth',block:'start'});
+  panel.classList.remove('hidden');requestAnimationFrame(()=>applyResultZoom(panel.querySelector('.result-comparison'),100));panel.scrollIntoView({behavior:'smooth',block:'start'});
  }catch(e){alert(e.message)}
 };
 $('closeSavedAnalysis').onclick=()=>{$('savedAnalysisPanel').classList.add('hidden');savedAnalysis=null;};
@@ -544,6 +658,7 @@ $('restoreForReanalysis').onclick=async()=>{
  if(!savedAnalysis)return;
  try{
   let p={};try{p=JSON.parse(savedAnalysis.parameter_json||'{}')}catch(e){}
+  if(!p.analysis_scope)p.analysis_scope='rectangle';
   setParameters(p);
   try{roi=savedAnalysis.roi_json?JSON.parse(savedAnalysis.roi_json):null}catch(e){roi=null}
   $('analysisExperiment').value=String(savedAnalysis.experiment_id);await refreshTreatments();
@@ -562,8 +677,14 @@ $('restoreForReanalysis').onclick=async()=>{
   const ext=blob.type==='image/png'?'.png':blob.type==='image/webp'?'.webp':'.jpg';
   rerunFile=new File([blob],`${savedAnalysis.sample_code}_R${Number(savedAnalysis.revision_no||1)+1}${ext}`,{type:blob.type||'image/jpeg'});
   rerunMeta={parent:savedAnalysis.parent_sample_id||savedAnalysis.id,revision:Number(savedAnalysis.revision_no||1)+1};
+  if(p.analysis_scope==='bread'&&savedAnalysis.bread_mask_path){
+    const image=await loadImage(rerunFile),prepared=prepareBreadImage(image,p);
+    await setupBreadMaskEditor(prepared,`${savedAnalysis.bread_mask_path}?t=${Date.now()}`);
+  }else if(p.analysis_scope==='bread'){
+    breadMaskStateCanvas=null;breadMaskPrepared=null;$('breadMaskEditor').classList.add('hidden');
+  }
   document.querySelector('[data-tab="analyze"]').click();
-  $('analysisProgress').innerHTML='<span class="notice">保存済み元画像・解析条件・ROIを読み込みました。必要に応じて調整して「選択画像を解析して保存」を押してください。</span>';
+  $('analysisProgress').innerHTML=`<span class="notice">保存済み元画像・解析条件・${p.analysis_scope==='bread'?'パン輪郭':'ROI'}を読み込みました。必要に応じて調整して「選択画像を解析して保存」を押してください。</span>`;
  }catch(e){alert(e.message)}
 };
 $('openSavedManualEditor').onclick=()=>{

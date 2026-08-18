@@ -18,7 +18,7 @@ import cv2
 import numpy as np
 
 
-ALGORITHM_VERSION = "10.2.1-python"
+ALGORITHM_VERSION = "10.5.0-python"
 
 
 def as_bool(parameters, key, default=False):
@@ -69,13 +69,88 @@ def diagnostic_result():
     }
 
 
-def analyze(input_path, output_dir, intermediate_dir, prefix, parameters):
+def largest_filled_component(binary):
+    contours_result = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours = contours_result[0] if len(contours_result) == 2 else contours_result[1]
+    if not contours:
+        return np.zeros_like(binary, dtype=np.uint8)
+    contour = max(contours, key=cv2.contourArea)
+    result = np.zeros_like(binary, dtype=np.uint8)
+    cv2.drawContours(result, [contour], -1, 255, cv2.FILLED)
+    return result
+
+
+def detect_bread_mask(source, parameters):
+    height, width = source.shape[:2]
+    if min(width, height) < 20:
+        raise RuntimeError("パン輪郭を検出するには画像が小さすぎます。")
+    margin = max(2, int(round(min(width, height) * 0.02)))
+    rectangle = (margin, margin, max(1, width - margin * 2), max(1, height - margin * 2))
+    grabcut_mask = np.zeros((height, width), dtype=np.uint8)
+    background_model = np.zeros((1, 65), np.float64)
+    foreground_model = np.zeros((1, 65), np.float64)
+    try:
+        cv2.grabCut(
+            source,
+            grabcut_mask,
+            rectangle,
+            background_model,
+            foreground_model,
+            max(1, as_int(parameters, "bread_grabcut_iterations", 5)),
+            cv2.GC_INIT_WITH_RECT,
+        )
+        candidate = np.where(
+            (grabcut_mask == cv2.GC_FGD) | (grabcut_mask == cv2.GC_PR_FGD), 255, 0
+        ).astype(np.uint8)
+        candidate = largest_filled_component(candidate)
+    except cv2.error:
+        candidate = np.zeros((height, width), dtype=np.uint8)
+
+    fraction = float(cv2.countNonZero(candidate)) / float(width * height)
+    if fraction < 0.03 or fraction > 0.95:
+        gray = cv2.cvtColor(source, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (9, 9), 0)
+        unused, threshold = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+        candidate = largest_filled_component(threshold)
+
+    smooth_size = odd(as_int(parameters, "bread_mask_smooth", 15), 3)
+    smooth_size = min(smooth_size, 51)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (smooth_size, smooth_size))
+    candidate = cv2.morphologyEx(candidate, cv2.MORPH_CLOSE, kernel)
+    candidate = cv2.morphologyEx(candidate, cv2.MORPH_OPEN, kernel)
+    candidate = largest_filled_component(candidate)
+    fraction = float(cv2.countNonZero(candidate)) / float(width * height)
+    if fraction < 0.03 or fraction > 0.95:
+        raise RuntimeError("パン輪郭を安定して検出できません。背景との明暗差または撮影範囲を確認してください。")
+    return candidate
+
+
+def analyze(input_path, output_dir, intermediate_dir, prefix, parameters, measurement_mask_path=None):
     source = cv2.imread(input_path, cv2.IMREAD_COLOR)
     if source is None:
         raise RuntimeError("解析画像を読み込めません。")
     height, width = source.shape[:2]
     if width < 2 or height < 2:
         raise RuntimeError("解析画像が小さすぎます。")
+
+    analysis_scope = str(parameters.get("analysis_scope", "rectangle"))
+    if measurement_mask_path:
+        measurement_mask = cv2.imread(measurement_mask_path, cv2.IMREAD_GRAYSCALE)
+        if measurement_mask is None:
+            raise RuntimeError("保存されたパン輪郭マスクを読み込めません。")
+        if measurement_mask.shape[:2] != (height, width):
+            raise RuntimeError("パン輪郭マスクと解析画像のサイズが一致しません。輪郭を再検出してください。")
+        unused, measurement_mask = cv2.threshold(measurement_mask, 127, 255, cv2.THRESH_BINARY)
+        measurement_mask = largest_filled_component(measurement_mask)
+    elif analysis_scope == "bread":
+        measurement_mask = detect_bread_mask(source, parameters)
+    else:
+        measurement_mask = np.full((height, width), 255, dtype=np.uint8)
+
+    if analysis_scope == "bread":
+        measurement_fraction = float(cv2.countNonZero(measurement_mask)) / float(width * height)
+        if measurement_fraction < 0.01 or measurement_fraction > 0.98:
+            raise RuntimeError("パン輪郭の面積が不正です。輪郭を再検出または手動修正してください。")
 
     gray = cv2.cvtColor(source, cv2.COLOR_BGR2GRAY)
     if as_bool(parameters, "use_clahe", True):
@@ -207,6 +282,14 @@ def analyze(input_path, output_dir, intermediate_dir, prefix, parameters):
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
         morphology = cv2.morphologyEx(morphology, cv2.MORPH_CLOSE, kernel)
 
+    border_margin = max(0, as_int(parameters, "border_margin", 3))
+    analysis_domain = measurement_mask.copy()
+    if border_margin > 0:
+        erosion_size = border_margin * 2 + 1
+        erosion_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (erosion_size, erosion_size))
+        analysis_domain = cv2.erode(analysis_domain, erosion_kernel)
+    morphology = cv2.bitwise_and(morphology, analysis_domain)
+
     final_mask = morphology.copy()
     distance = np.zeros_like(gray, dtype=np.float32)
     watershed_view = source.copy()
@@ -237,16 +320,17 @@ def analyze(input_path, output_dir, intermediate_dir, prefix, parameters):
 
     # Preserve the full shape of rescued broad pores after Watershed.
     if as_bool(parameters, "use_large_hole_rescue", True):
+        large_hole_mask = cv2.bitwise_and(large_hole_mask, analysis_domain)
         final_mask = cv2.bitwise_or(final_mask, large_hole_mask)
 
-    border_margin = max(0, as_int(parameters, "border_margin", 3))
-    if border_margin > 0:
+    final_mask = cv2.bitwise_and(final_mask, analysis_domain)
+    if border_margin > 0 and analysis_scope != "bread":
         border_margin = min(border_margin, max(1, min(width, height) // 2))
         cv2.rectangle(final_mask, (0, 0), (width - 1, height - 1), 0, border_margin)
 
     contours_result = cv2.findContours(final_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     contours = contours_result[0] if len(contours_result) == 2 else contours_result[1]
-    bread_area_mm2 = width * height * pixel_area_to_mm2
+    bread_area_mm2 = cv2.countNonZero(measurement_mask) * pixel_area_to_mm2
     minimum_area = max(0.0, as_float(parameters, "min_area_mm2", 0.15))
     maximum_area = max(0.0, as_float(parameters, "max_area_mm2", 0.0))
     minimum_circularity = max(0.0, as_float(parameters, "min_circularity", 0.0))
@@ -303,6 +387,10 @@ def analyze(input_path, output_dir, intermediate_dir, prefix, parameters):
         thickness = cv2.FILLED if as_bool(parameters, "fill_contours", True) else 2
         cv2.drawContours(overlay, [contour], -1, color, thickness)
     result_image = cv2.addWeighted(source, 0.70, overlay, 0.30, 0)
+    if analysis_scope == "bread":
+        bread_contours_result = cv2.findContours(measurement_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        bread_contours = bread_contours_result[0] if len(bread_contours_result) == 2 else bread_contours_result[1]
+        cv2.drawContours(result_image, bread_contours, -1, (255, 100, 0), 3)
     for contour, number, size_class, center_x, center_y in accepted:
         color = colors[size_class]
         cv2.drawContours(result_image, [contour], -1, color, 2)
@@ -350,6 +438,7 @@ def analyze(input_path, output_dir, intermediate_dir, prefix, parameters):
             "clahe": enhanced,
             "threshold": binary,
             "morphology": morphology,
+            "measurement_mask": measurement_mask,
             "large_hole_contrast": large_hole_contrast,
             "large_hole_mask": large_hole_mask,
             "final_mask": final_mask,
@@ -384,11 +473,14 @@ def analyze(input_path, output_dir, intermediate_dir, prefix, parameters):
 def parse_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument("--diagnose", action="store_true")
+    parser.add_argument("--detect-bread", action="store_true")
     parser.add_argument("--input")
     parser.add_argument("--output-dir")
     parser.add_argument("--intermediate-dir")
     parser.add_argument("--parameters-json", default="{}")
     parser.add_argument("--prefix", default="analysis")
+    parser.add_argument("--mask-output")
+    parser.add_argument("--measurement-mask")
     return parser.parse_args()
 
 
@@ -396,6 +488,24 @@ def main():
     arguments = parse_arguments()
     if arguments.diagnose:
         result = diagnostic_result()
+    elif arguments.detect_bread:
+        if not arguments.input or not arguments.mask_output:
+            raise RuntimeError("パン輪郭検出に必要な引数が不足しています。")
+        source = cv2.imread(arguments.input, cv2.IMREAD_COLOR)
+        if source is None:
+            raise RuntimeError("輪郭検出画像を読み込めません。")
+        parameters = json.loads(arguments.parameters_json)
+        mask = detect_bread_mask(source, parameters)
+        if not cv2.imwrite(arguments.mask_output, mask):
+            raise RuntimeError("パン輪郭マスクを書き出せません。")
+        result = {
+            "ok": True,
+            "mode": "bread_mask",
+            "width": int(mask.shape[1]),
+            "height": int(mask.shape[0]),
+            "area_pixels": int(cv2.countNonZero(mask)),
+            "algorithm_version": ALGORITHM_VERSION,
+        }
     else:
         if not arguments.input or not arguments.output_dir or not arguments.intermediate_dir:
             raise RuntimeError("解析に必要な引数が不足しています。")
@@ -408,6 +518,7 @@ def main():
             arguments.intermediate_dir,
             arguments.prefix,
             parameters,
+            arguments.measurement_mask,
         )
     print(json.dumps(result, ensure_ascii=False, allow_nan=False, separators=(",", ":")))
 

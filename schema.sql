@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS samples (
     large_hole_count INT NOT NULL DEFAULT 0,
     original_image_path VARCHAR(500) NULL,
     result_image_path VARCHAR(500) NULL,
+    bread_mask_path VARCHAR(500) NULL,
     app_version VARCHAR(50) NOT NULL,
     parent_sample_id BIGINT UNSIGNED NULL,
     revision_no INT NOT NULL DEFAULT 1,

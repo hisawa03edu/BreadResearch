@@ -13,7 +13,7 @@ return [
     'login_password_hash' => '',
     'login_password_plain' => 'CHANGE_ME_NOW',
     'app_name' => 'パン断面 研究解析システム',
-    'app_version' => '10.4.0',
+    'app_version' => '10.5.5',
     'python' => [
         // Xserver上で構築済みの仮想環境を指定します。
         'binary' => '/home/a-pages/python/venv/bin/python',
