@@ -1,0 +1,71 @@
+name: Apply BreadResearch 10.5.5 release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/apply-v10-5-5.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout upgrade branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/upgrade-breadresearch-10-5-5
+          fetch-depth: 0
+
+      - name: Rebuild and apply release patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .release-patch/part-* > /tmp/v10_5_5.patch
+          echo "Patch SHA256: $(sha256sum /tmp/v10_5_5.patch | awk '{print $1}')"
+          patch --dry-run -p1 < /tmp/v10_5_5.patch
+          patch -p1 < /tmp/v10_5_5.patch
+
+      - name: Verify exact 10.5.5 release hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/v10_5_5.sha256 <<'EOF'
+          d64ff5214c74b643085ccd89800d696ad8d73d463bb79ef903675c349f45a2fd  README.md
+          0bec409e2a7b3eb3ba11655b507bb824ea232de80c493dd5cae495291090a28f  api.php
+          0a1ac5e0ebf219fb50698a81302058485696e7a1f022fa29f97525a9387236a1  assets/app.js
+          40cd5f50ef2182eba048dc50d328da85c1e377b2e9682dab43b39a6668c59a46  assets/style.css
+          29aca8dc2acff1c5e55f6f66121badc98e9b4ba2a8adc9eea29c647ee97e3529  config.sample.php
+          297c775540e0a06d52523fc96a0495fcff31f0961f2ac68feecff5ebbc1ebc4c  index.php
+          f9db9dd5fcaef239a6f68c0b264bfd9747a8c0647def1dfd4f4eba8f60554c93  parameter_manual.php
+          fa28d421a28ed9b6f4b997d5119c2b8adbacff6e2dd119a179b71230f9664934  python/.htaccess
+          3ab0518c5b94871d4544144453773f6c5c4e45bec9a4007becbc0381f3c919a1  python/analyze.py
+          aaefbc23712c9fffc7356cfeb68ab8d04305629e7f25defbbf1eed8490fc6ad6  schema.sql
+          ea9646f72f06835cf76e3b3b0ec3352a388bb69b37577118e72c015d3dcc9ff5  migration_v10_4_to_v10_5.sql
+          EOF
+          sha256sum -c /tmp/v10_5_5.sha256
+
+      - name: Syntax checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          php -l api.php
+          php -l index.php
+          php -l parameter_manual.php
+          python3 -m py_compile python/analyze.py
+
+      - name: Commit verified release source
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .release-patch
+          rm -f .github/workflows/apply-v10-5-5.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Upgrade BreadResearch to 10.5.5"
+          git push origin HEAD:agent/upgrade-breadresearch-10-5-5
