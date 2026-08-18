@@ -9,7 +9,8 @@ let dataTableState={
   pageSize:50,
   sortKey:'processed_at',
   sortDir:'desc',
-  visibleColumns:{}
+  visibleColumns:{},
+  showThumbnails:false
 };
 let filteredSamples=[];
 let selectedSampleIds=new Set();
@@ -457,6 +458,7 @@ function initDataTableState(){
  }
  $('dataSearch').value=dataTableState.search||'';
  $('dataPageSize').value=String(dataTableState.pageSize||50);
+ if($('dataThumbnailToggle'))$('dataThumbnailToggle').checked=!!dataTableState.showThumbnails;
  renderColumnPicker();
 }
 function saveDataTableState(){localStorage.setItem('breadDataTableState',JSON.stringify(dataTableState));}
@@ -484,6 +486,10 @@ function formatCell(v,type){
  if(type==='number'){const n=Number(v);return Number.isFinite(n)?n.toLocaleString('ja-JP',{maximumFractionDigits:3}):esc(v);}
  return esc(v);
 }
+function sampleThumbnailCell(path,label,sampleId){
+ if(!path)return '<td class="thumbnail-cell"><span class="thumbnail-empty">—</span></td>';
+ return `<td class="thumbnail-cell"><button type="button" class="thumbnail-button" onclick="viewSavedAnalysis(${sampleId})" title="${esc(label)}を開く"><img class="sample-thumbnail" src="${esc(path)}" alt="${esc(label)}" loading="lazy"></button></td>`;
+}
 function renderSamplesTable(){
  filteredSamples=getFilteredSortedSamples();
  const total=filteredSamples.length,pageSize=dataTableState.pageSize==='all'?Math.max(1,total):Number(dataTableState.pageSize||50);
@@ -491,11 +497,13 @@ function renderSamplesTable(){
  dataTableState.page=Math.min(Math.max(1,dataTableState.page),pageCount);
  const start=(dataTableState.page-1)*pageSize,end=Math.min(total,start+pageSize),rows=filteredSamples.slice(start,end);
  const cols=getVisibleSampleColumns();
- $('samplesTable').innerHTML=`<thead><tr><th class="select-cell"><input id="selectPageSamples" type="checkbox" title="このページをすべて選択"></th>${cols.map(c=>{
+ const showThumbnails=!!dataTableState.showThumbnails;
+ const thumbnailHeaders=showThumbnails?'<th class="thumbnail-cell">元画像</th><th class="thumbnail-cell">解析結果</th>':'';
+ $('samplesTable').innerHTML=`<thead><tr><th class="select-cell"><input id="selectPageSamples" type="checkbox" title="このページをすべて選択"></th>${thumbnailHeaders}${cols.map(c=>{
    const arrow=dataTableState.sortKey===c.key?(dataTableState.sortDir==='asc'?' ▲':' ▼'):'';
    return `<th class="sortable" data-sort="${c.key}">${esc(c.label)}${arrow}</th>`;
  }).join('')}<th>操作</th></tr></thead><tbody>`+
- rows.map(s=>`<tr class="${selectedSampleIds.has(Number(s.id))?'selected-row':''}"><td class="select-cell"><input class="sample-select" type="checkbox" data-sample-id="${s.id}" ${selectedSampleIds.has(Number(s.id))?'checked':''}></td>${cols.map(c=>`<td>${formatCell(s[c.key],c.type)}</td>`).join('')}<td class="action-cell"><button onclick="viewSavedAnalysis(${s.id})">画像・結果</button> <button onclick="showHoles(${s.id})">空洞詳細</button> <button onclick="deleteSample(${s.id})">削除</button></td></tr>`).join('')+'</tbody>';
+ rows.map(s=>{const thumbs=showThumbnails?sampleThumbnailCell(s.original_image_path,'元画像',s.id)+sampleThumbnailCell(s.latest_corrected_result_path||s.result_image_path,'解析結果',s.id):'';return `<tr class="${selectedSampleIds.has(Number(s.id))?'selected-row':''}"><td class="select-cell"><input class="sample-select" type="checkbox" data-sample-id="${s.id}" ${selectedSampleIds.has(Number(s.id))?'checked':''}></td>${thumbs}${cols.map(c=>`<td>${formatCell(s[c.key],c.type)}</td>`).join('')}<td class="action-cell"><button onclick="viewSavedAnalysis(${s.id})">画像・結果</button> <button onclick="showHoles(${s.id})">空洞詳細</button> <button onclick="deleteSample(${s.id})">削除</button></td></tr>`;}).join('')+'</tbody>';
  $('samplesTable').querySelectorAll('th.sortable').forEach(th=>th.onclick=()=>{
    const key=th.dataset.sort;if(dataTableState.sortKey===key)dataTableState.sortDir=dataTableState.sortDir==='asc'?'desc':'asc';
    else{dataTableState.sortKey=key;dataTableState.sortDir='asc';}
@@ -536,11 +544,12 @@ async function loadSamples(){
 $('dataExperiment').onchange=loadSamples;
 $('dataSearch').oninput=e=>{dataTableState.search=e.target.value;dataTableState.page=1;renderSamplesTable();};
 $('dataPageSize').onchange=e=>{dataTableState.pageSize=e.target.value==='all'?'all':Number(e.target.value);dataTableState.page=1;renderSamplesTable();};
+$('dataThumbnailToggle').onchange=e=>{dataTableState.showThumbnails=!!e.target.checked;saveDataTableState();renderSamplesTable();};
 $('dataPrevPage').onclick=()=>{if(dataTableState.page>1){dataTableState.page--;renderSamplesTable();}};
 $('dataNextPage').onclick=()=>{dataTableState.page++;renderSamplesTable();};
 $('resetDataTable').onclick=()=>{
  localStorage.removeItem('breadDataTableState');
- dataTableState={search:'',page:1,pageSize:50,sortKey:'processed_at',sortDir:'desc',visibleColumns:{}};
+ dataTableState={search:'',page:1,pageSize:50,sortKey:'processed_at',sortDir:'desc',visibleColumns:{},showThumbnails:false};
  initDataTableState();renderSamplesTable();
 };
 function updateSelectedSampleCount(){

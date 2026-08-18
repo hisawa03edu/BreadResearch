@@ -761,7 +761,9 @@ try {
 
     if ($action === 'samples') {
         $eid = (int)($_GET['experiment_id'] ?? 0);
-        $st = $pdo->prepare("SELECT s.*, t.name treatment_name
+        $st = $pdo->prepare("SELECT s.*, t.name treatment_name,
+            (SELECT mc.corrected_result_path FROM manual_corrections mc
+             WHERE mc.sample_id=s.id ORDER BY mc.created_at DESC,mc.id DESC LIMIT 1) latest_corrected_result_path
             FROM samples s JOIN treatments t ON t.id=s.treatment_id
             WHERE s.experiment_id=? ORDER BY t.display_order,s.sample_code,s.id");
         $st->execute([$eid]);

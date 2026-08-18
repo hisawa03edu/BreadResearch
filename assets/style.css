@@ -115,3 +115,11 @@ button:disabled{opacity:.55;cursor:not-allowed}.hidden{display:none!important}.c
  body{background:#fff}header,nav,#tab-dashboard,#tab-manage,#tab-analyze,#tab-data,#tab-stats .form-grid,#tab-stats> .card>button,#tab-stats .inline-check{display:none!important}
  main{max-width:none;padding:0}#tab-stats{display:block!important}#tab-stats .card{border:none;padding:0}.chart-box{overflow:visible;border:none;break-inside:avoid}table{font-size:10px}h3{break-after:avoid}.table-wrap{overflow:visible;break-inside:avoid}
 }
+
+
+.thumbnail-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0 10px;padding:8px 10px;background:#f6f9fc;border:1px solid var(--line);border-radius:8px}
+.thumbnail-cell{text-align:center!important;vertical-align:middle!important;min-width:118px}
+.thumbnail-button{display:inline-block;padding:3px;border:1px solid #c8d0d8;background:#fff;border-radius:7px;line-height:0}
+.thumbnail-button:hover{background:#eef6fc}
+.sample-thumbnail{display:block;width:108px;height:78px;object-fit:contain;background:#222;border-radius:4px}
+.thumbnail-empty{color:#7b8794}
