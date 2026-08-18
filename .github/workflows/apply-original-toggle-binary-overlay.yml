@@ -1,5 +1,6 @@
 name: Apply original toggle and binary overlay
 
+# Triggered once to apply the verified UI patch to the feature branch.
 on:
   push:
     branches:
