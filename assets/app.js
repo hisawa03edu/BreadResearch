@@ -399,10 +399,10 @@ $('runAnalysis').onclick=async()=>{
    const intermediateUrls={};Object.entries(saved.intermediates||{}).forEach(([k,v])=>intermediateUrls[k]=`${v}?t=${Date.now()}`);
    const metrics=Object.entries(saved.summary).map(([k,v])=>`<div class="metric"><b>${esc(metricLabel(k))}</b><br>${formatMetricValue(k,v)}</div>`).join('');
    const binaryAreaUrl=intermediateUrls.binary_area||'';
-   const binaryViewer=binaryAreaUrl?`<figure class="result-comparison binary-image-viewer"><div class="result-view-controls"><label class="result-zoom-control">表示倍率 <input class="result-zoom-range" type="range" min="25" max="300" step="5" value="100"><output>100%</output></label></div><div class="result-zoom-viewport"><div class="result-overlay-stage" data-image-width="${prepared.width}" data-image-height="${prepared.height}" style="--result-aspect:${prepared.width}/${prepared.height}"><img class="result-base-image" src="${binaryAreaUrl}" alt="二値化画像"></div></div><figcaption>二値化画像（白＝空洞・黒＝生地・灰＝解析範囲外）</figcaption></figure>`:'';
+   const binaryViewer=binaryAreaUrl?`<figure class="result-comparison binary-image-viewer"><div class="result-view-controls"><label class="result-opacity-control">二値化画像の濃度 <input class="result-opacity-range" type="range" min="0" max="100" value="60"><output>60%</output></label><label class="result-zoom-control">表示倍率 <input class="result-zoom-range" type="range" min="25" max="300" step="5" value="100"><output>100%</output></label></div><div class="result-zoom-viewport"><div class="result-overlay-stage" data-image-width="${prepared.width}" data-image-height="${prepared.height}" style="--result-aspect:${prepared.width}/${prepared.height}"><img class="result-base-image" src="${prepared.analysisDataUrl}" alt="解析範囲の元画像"><img class="result-overlay-image" src="${binaryAreaUrl}" alt="二値化画像" style="opacity:.6"></div></div><figcaption>二値化画像（元画像＋二値化オーバーレイ／白＝空洞・黒＝生地・灰＝解析範囲外）</figcaption></figure>`:'';
    const otherIntermediateUrls=Object.fromEntries(Object.entries(intermediateUrls).filter(([key])=>key!=='binary_area'));
    $('analysisResults').insertAdjacentHTML('beforeend',`<div class="card"><h2>${esc(f.name)} <small>${esc(saved.processed_at)}</small></h2>
-    <div class="metric-grid">${metrics}</div><div class="result-grid"><figure><img src="${prepared.originalDataUrl}" alt="元画像"><figcaption>元画像</figcaption></figure><figure class="result-comparison"><div class="result-view-controls"><label class="result-opacity-control">検出結果の濃度 <input class="result-opacity-range" type="range" min="0" max="100" value="60"><output>60%</output></label><label class="result-zoom-control">表示倍率 <input class="result-zoom-range" type="range" min="25" max="300" step="5" value="100"><output>100%</output></label></div><div class="result-zoom-viewport"><div class="result-overlay-stage" data-image-width="${prepared.width}" data-image-height="${prepared.height}" style="--result-aspect:${prepared.width}/${prepared.height}"><img class="result-base-image" src="${prepared.analysisDataUrl}" alt="解析範囲の元画像"><img class="result-overlay-image" src="${resultUrl}" alt="解析結果" style="opacity:.6"></div></div><figcaption>解析結果（拡大時は画像内をスクロールできます）</figcaption></figure>${binaryViewer}</div>
+    <div class="metric-grid">${metrics}</div><div class="image-visibility-toolbar"><label class="inline-check"><input class="original-visibility-toggle" type="checkbox"> 元画像を表示</label></div><div class="result-grid"><figure class="original-result-figure hidden"><img src="${prepared.originalDataUrl}" alt="元画像"><figcaption>元画像</figcaption></figure><figure class="result-comparison"><div class="result-view-controls"><label class="result-opacity-control">検出結果の濃度 <input class="result-opacity-range" type="range" min="0" max="100" value="60"><output>60%</output></label><label class="result-zoom-control">表示倍率 <input class="result-zoom-range" type="range" min="25" max="300" step="5" value="100"><output>100%</output></label></div><div class="result-zoom-viewport"><div class="result-overlay-stage" data-image-width="${prepared.width}" data-image-height="${prepared.height}" style="--result-aspect:${prepared.width}/${prepared.height}"><img class="result-base-image" src="${prepared.analysisDataUrl}" alt="解析範囲の元画像"><img class="result-overlay-image" src="${resultUrl}" alt="解析結果" style="opacity:.6"></div></div><figcaption>解析結果（拡大時は画像内をスクロールできます）</figcaption></figure>${binaryViewer}</div>
     ${Object.keys(otherIntermediateUrls).length?`<details><summary>解析途中画像</summary><div class="intermediate-grid">${Object.entries(otherIntermediateUrls).map(([k,u])=>`<figure><img src="${u}"><figcaption>${esc(intermediateLabel(k))}</figcaption></figure>`).join('')}</div></details>`:''}
     <p class="notice">手動補正は「データ一覧」→「画像・結果」から開けます。</p></div>`);
   }catch(e){
@@ -627,6 +627,12 @@ document.addEventListener('input',event=>{
   applyResultZoom(figure,value);if(output)output.textContent=`${value}%`;
  }
 });
+document.addEventListener('change',event=>{
+ if(!event.target.classList.contains('original-visibility-toggle'))return;
+ const card=event.target.closest('.card');
+ const originalFigure=card?.querySelector('.original-result-figure');
+ if(originalFigure)originalFigure.classList.toggle('hidden',!event.target.checked);
+});
 function loadUrlImage(url){return new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(new Error('比較用画像を読み込めません。'));image.src=url;});}
 async function prepareSavedResultBase(originalUrl,resultUrl,parametersData,roiData){
  const [original,result]=await Promise.all([loadUrlImage(originalUrl),loadUrlImage(resultUrl)]),canvas=$('savedResultBaseCanvas'),context=canvas.getContext('2d');
@@ -652,7 +658,7 @@ window.viewSavedAnalysis=async id=>{
    'mean_eq_diameter_mm','small_hole_count','medium_hole_count','large_hole_count'];
   $('savedAnalysisMetrics').innerHTML=keys.map(k=>`<div class="metric"><b>${metricLabel(k)}</b><br>${formatMetricValue(k,s[k])}</div>`).join('');
   const originalUrl=`${s.original_image_path}?t=${Date.now()}`,resultUrl=`${s.latest_corrected_result_path||s.result_image_path}?t=${Date.now()}`;
-  $('savedOriginalImage').src=originalUrl;$('savedResultImage').src=resultUrl;$('savedResultImage').style.opacity='.6';$('savedResultOpacity').value='60';$('savedResultOpacityValue').textContent='60%';$('savedResultZoom').value='100';$('savedResultZoomValue').textContent='100%';$('savedResultOverlayStage').style.width='100%';$('savedResultOverlayStage').classList.remove('zoom-reduced');
+  $('savedOriginalImage').src=originalUrl;$('savedOriginalToggle').checked=false;$('savedOriginalFigure').classList.add('hidden');$('savedResultImage').src=resultUrl;$('savedResultImage').style.opacity='.6';$('savedResultOpacity').value='60';$('savedResultOpacityValue').textContent='60%';$('savedResultZoom').value='100';$('savedResultZoomValue').textContent='100%';$('savedResultOverlayStage').style.width='100%';$('savedResultOverlayStage').classList.remove('zoom-reduced');
   let p={};try{p=JSON.parse(s.parameter_json||'{}')}catch(e){}
   let roiData=null;try{roiData=s.roi_json?JSON.parse(s.roi_json):null}catch(e){}
   await prepareSavedResultBase(originalUrl,resultUrl,p,roiData);
@@ -661,7 +667,8 @@ window.viewSavedAnalysis=async id=>{
    const binaryUrl=`${s.binary_area_image_path}?t=${Date.now()}`;
    try{
     const binaryImage=await loadUrlImage(binaryUrl),stage=$('savedBinaryStage');
-    $('savedBinaryImage').src=binaryUrl;stage.dataset.imageWidth=String(binaryImage.naturalWidth);stage.dataset.imageHeight=String(binaryImage.naturalHeight);stage.style.setProperty('--result-aspect',`${binaryImage.naturalWidth}/${binaryImage.naturalHeight}`);stage.style.width='100%';stage.classList.remove('zoom-reduced');
+    $('savedBinaryImage').src=binaryUrl;$('savedBinaryImage').style.opacity='.6';$('savedBinaryOpacity').value='60';$('savedBinaryOpacityValue').textContent='60%';stage.dataset.imageWidth=String(binaryImage.naturalWidth);stage.dataset.imageHeight=String(binaryImage.naturalHeight);stage.style.setProperty('--result-aspect',`${binaryImage.naturalWidth}/${binaryImage.naturalHeight}`);stage.style.width='100%';stage.classList.remove('zoom-reduced');
+    const binaryBase=$('savedBinaryBaseCanvas'),binaryBaseContext=binaryBase.getContext('2d'),resultBase=$('savedResultBaseCanvas');binaryBase.width=binaryImage.naturalWidth;binaryBase.height=binaryImage.naturalHeight;binaryBaseContext.clearRect(0,0,binaryBase.width,binaryBase.height);binaryBaseContext.drawImage(resultBase,0,0,binaryBase.width,binaryBase.height);
     $('savedBinaryZoom').value='100';$('savedBinaryZoomValue').textContent='100%';binaryFigure.classList.remove('hidden');
    }catch(_){binaryFigure.classList.add('hidden');}
   }

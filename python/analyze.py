@@ -460,13 +460,13 @@ def analyze(input_path, output_dir, intermediate_dir, prefix, parameters, measur
 
     result_filename = prefix + "_overlay.png"
     write_image(output_dir, result_filename, result_image)
-    intermediate_files = {}
+    binary_area_filename = prefix + "_binary_area.png"
+    intermediate_files = {"binary_area": write_image(intermediate_dir, binary_area_filename, binary_area_view)}
     if as_bool(parameters, "save_intermediates", True):
         stages = {
             "gray": gray,
             "clahe": enhanced,
             "threshold": binary,
-            "binary_area": binary_area_view,
             "morphology": morphology,
             "measurement_mask": measurement_mask,
             "large_hole_contrast": large_hole_contrast,
