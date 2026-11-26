@@ -11,7 +11,7 @@ if (file_exists($configFile)) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title><?= htmlspecialchars($appName, ENT_QUOTES, 'UTF-8') ?></title>
-<link rel="stylesheet" href="assets/style.css?v=10.6.0-roi-display1">
+<link rel="stylesheet" href="assets/style.css?v=10.6.0-saved-print1">
 </head>
 <body>
 <div id="loginView" class="center-card hidden">
@@ -292,7 +292,7 @@ if (file_exists($configFile)) {
   <div id="savedAnalysisPanel" class="card hidden">
     <div class="panel-title-row">
       <h2>保存済み解析の表示</h2>
-      <button id="closeSavedAnalysis">閉じる</button>
+      <div class="saved-print-actions"><button id="printSavedAnalysis" class="primary" type="button">印刷・PDF保存</button><button id="closeSavedAnalysis" type="button">閉じる</button></div>
     </div>
     <div id="savedAnalysisMeta"></div>
     <div id="savedAnalysisMetrics" class="metric-grid"></div>
@@ -381,8 +381,9 @@ if (file_exists($configFile)) {
 </main>
 </div>
 
+<section id="savedAnalysisPrintReport" class="saved-analysis-print-report" aria-hidden="true"></section>
 <canvas id="workCanvas" class="hidden"></canvas>
 <script defer src="assets/vendor/xlsx.full.min.js"></script>
-<script defer src="assets/app.js?v=10.6.0-roi-display1"></script>
+<script defer src="assets/app.js?v=10.6.0-saved-print1"></script>
 </body>
 </html>
