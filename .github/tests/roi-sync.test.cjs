@@ -91,3 +91,46 @@ test('saved original ROI markers and metadata are wired to saved detail only',()
  assert.doesNotMatch(view,/処理日時/);
  assert.match(view,/await showSavedOriginalRange\(s,p,roiData,original\.naturalWidth,original\.naturalHeight,generation\)/);
 });
+
+
+test('print helpers preserve ROI coordinates and clamp image opacity',()=>{
+ const sandbox={document:{createElement:()=>({})}};vm.createContext(sandbox);
+ vm.runInContext(between('function savedPrintCanvas','async function savedPrintOriginal'),sandbox);
+ assert.equal(sandbox.savedPrintOpacity('60'),.6);
+ assert.equal(sandbox.savedPrintOpacity('0'),0);
+ assert.equal(sandbox.savedPrintOpacity('100'),1);
+ assert.equal(sandbox.savedPrintOpacity('200'),1);
+ assert.equal(sandbox.savedPrintOpacity('invalid'),.6);
+ assert.deepEqual(JSON.parse(JSON.stringify(sandbox.savedPrintCanvas(4000,2000))),{width:2400,height:1200});
+ assert.deepEqual(JSON.parse(JSON.stringify(sandbox.savedPrintCanvas(800,400))),{width:800,height:400});
+ assert.deepEqual(JSON.parse(JSON.stringify(sandbox.savedPrintRoiRect({left:'20%',top:'20%',width:'40%',height:'30%'},2400,1200))),{x:480,y:240,w:960,h:360});
+ assert.equal(sandbox.savedPrintRoiRect({left:'90%',top:'0%',width:'30%',height:'30%'},2400,1200),null);
+});
+test('print overlay uses the entire stored analysis image, not viewport zoom',async()=>{
+ const calls=[],ctx={globalAlpha:1,drawImage(image,...coords){calls.push({image,coords,alpha:this.globalAlpha});}};
+ const base={width:1400,height:700},overlay={naturalWidth:1400,naturalHeight:700};
+ const elements={base,overlay:{src:'saved-overlay.png'}};
+ const sandbox={$:id=>elements[id],document:{createElement:()=>({getContext:()=>ctx})},loadUrlImage:async()=>overlay};
+ vm.createContext(sandbox);
+ vm.runInContext(between('function savedPrintCanvas','async function savedPrintFigure'),sandbox);
+ const canvas=await sandbox.savedPrintOverlay('base','overlay',.6);
+ assert.equal(canvas.width,1400);
+ assert.equal(canvas.height,700);
+ assert.deepEqual(calls,[{image:base,coords:[0,0,1400,700],alpha:1},{image:overlay,coords:[0,0,1400,700],alpha:.6}]);
+ assert.equal(ctx.globalAlpha,1);
+});
+test('saved analysis print is isolated from statistics and includes all stored parameters',()=>{
+ const html=fs.readFileSync('index.php','utf8'),css=fs.readFileSync('assets/style.css','utf8');
+ const print=between("$('printSavedAnalysis').onclick","$('restoreForReanalysis').onclick");
+ assert.match(html,/id="printSavedAnalysis"/);
+ assert.match(html,/id="savedAnalysisPrintReport"/);
+ assert.match(print,/savedOriginalToggle.*checked/);
+ assert.match(print,/parameterTable\.rows/);
+ assert.match(print,/createTHead/);
+ assert.match(print,/保存された解析条件・ROI/);
+ assert.match(print,/window\.print\(\)/);
+ assert.match(print,/generation!==savedViewGeneration/);
+ assert.match(css,/body\.printing-saved-analysis > :not\(#savedAnalysisPrintReport\)/);
+ assert.match(css,/\.saved-print-conditions thead\{display:table-header-group\}/);
+ assert.match(source,/window\.addEventListener\('afterprint',clearSavedPrintReport\)/);
+});
