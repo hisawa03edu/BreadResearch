@@ -160,7 +160,7 @@ if (file_exists($configFile)) {
 <label>大空洞候補最小面積(mm²)<input id="largeHoleMinArea" type="number" value="2" min="0" step="0.25"></label>
 <label>大空洞候補最大占有率(%)<input id="largeHoleMaxFraction" type="number" value="5" min="0.1" max="25" step="0.5"></label>
 <label>境界除外幅(px)<input id="borderMargin" type="number" value="3"></label>
-<label>最小面積(mm²)<input id="minArea" type="number" value="0.15" step="0.05"></label>
+<label>空洞の最小面積(mm²)<input id="minArea" type="number" value="0.15" min="0" step="0.05"><span class="small-note">この面積未満の空洞候補を空洞数・面積の集計から除外（標準：0.15 mm²）。二値化白領域の面積には適用しません。</span></label>
 <label>最大面積(mm²)<input id="maxArea" type="number" value="0"></label>
 <label>最小円形度<input id="minCircularity" type="number" value="0" step="0.05"></label>
 <label>最大縦横比<input id="maxAspect" type="number" value="20"></label>
@@ -285,7 +285,7 @@ if (file_exists($configFile)) {
     </div>
   </div>
   <div id="selectedSampleEditPanel" class="card hidden">
-    <div class="panel-title-row"><div><h2>選択データの名称・所属試験区を修正</h2><p class="small-note">各行ごとに所属試験区とサンプル名を変更できます。解析値・画像・空洞詳細は変更されません。</p></div><button id="closeSelectedSampleEditor">閉じる</button></div>
+    <div class="panel-title-row"><div><h2>サンプル名・所属試験区の修正</h2><p class="small-note">各行ごとに所属試験区とサンプル名を変更できます。解析値・画像・空洞詳細は変更されません。</p></div><button id="closeSelectedSampleEditor">閉じる</button></div>
     <div class="table-wrap"><table id="selectedSampleEditTable"></table></div>
     <div class="editor-actions"><button id="saveSelectedSampleEdits" class="primary">変更を保存</button><span id="selectedSampleEditStatus"></span></div>
   </div>
@@ -384,6 +384,6 @@ if (file_exists($configFile)) {
 <section id="savedAnalysisPrintReport" class="saved-analysis-print-report" aria-hidden="true"></section>
 <canvas id="workCanvas" class="hidden"></canvas>
 <script defer src="assets/vendor/xlsx.full.min.js"></script>
-<script defer src="assets/app.js?v=10.6.0-saved-print1"></script>
+<script defer src="assets/app.js?v=10.6.0-row-edit1"></script>
 </body>
 </html>
