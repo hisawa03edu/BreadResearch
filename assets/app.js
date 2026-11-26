@@ -928,6 +928,100 @@ window.viewSavedAnalysis=async id=>{
  }catch(e){if(generation===savedViewGeneration)alert(e.message)}
 };
 $('closeSavedAnalysis').onclick=()=>{++savedViewGeneration;$('savedAnalysisPanel').classList.add('hidden');savedAnalysis=null;clearSavedOriginalRange();};
+function savedPrintCanvas(width,height,maxDimension=2400){
+ const scale=Math.min(1,maxDimension/Math.max(width,height));
+ const canvas=document.createElement('canvas');
+ canvas.width=Math.max(1,Math.round(width*scale));canvas.height=Math.max(1,Math.round(height*scale));
+ return canvas;
+}
+function savedPrintOpacity(value){
+ const number=Number(value);
+ return Number.isFinite(number)?Math.max(0,Math.min(100,number))/100:0.6;
+}
+function savedPrintRoiRect(style,width,height){
+ const values=['left','top','width','height'].map(key=>parseFloat(style[key]));
+ if(values.some(v=>!Number.isFinite(v)))return null;
+ const [x,y,w,h]=values;
+ if(x<0||y<0||w<=0||h<=0||x+w>100.00001||y+h>100.00001)return null;
+ return {x:x*width/100,y:y*height/100,w:w*width/100,h:h*height/100};
+}
+async function savedPrintOriginal(){
+ const image=await loadUrlImage($('savedOriginalImage').src);
+ const canvas=savedPrintCanvas(image.naturalWidth,image.naturalHeight),ctx=canvas.getContext('2d');
+ ctx.drawImage(image,0,0,canvas.width,canvas.height);
+ const mask=$('savedRoiMask'),rect=$('savedRoiRect');
+ if(!mask.classList.contains('hidden'))ctx.drawImage(mask,0,0,canvas.width,canvas.height);
+ if(!rect.classList.contains('hidden')){
+  const box=savedPrintRoiRect(rect.style,canvas.width,canvas.height);
+  if(box){
+   const line=Math.max(2,Math.round(canvas.width/200));
+   const inset=Math.min(line,box.w/4,box.h/4);
+   ctx.strokeStyle='#333';ctx.lineWidth=inset*1.6;
+   ctx.strokeRect(box.x+inset,box.y+inset,box.w-2*inset,box.h-2*inset);
+   ctx.strokeStyle='#ffea00';ctx.lineWidth=inset;
+   ctx.strokeRect(box.x+inset,box.y+inset,box.w-2*inset,box.h-2*inset);
+  }
+ }
+ return canvas;
+}
+async function savedPrintOverlay(baseId,imageId,opacity){
+ const base=$(baseId),overlay=await loadUrlImage($(imageId).src);
+ if(!base.width||!base.height)throw new Error('解析画像がまだ読み込まれていません。');
+ const canvas=savedPrintCanvas(base.width,base.height),ctx=canvas.getContext('2d');
+ ctx.drawImage(base,0,0,canvas.width,canvas.height);
+ ctx.globalAlpha=opacity;ctx.drawImage(overlay,0,0,canvas.width,canvas.height);ctx.globalAlpha=1;
+ return canvas;
+}
+async function savedPrintFigure(canvas,caption,original=false){
+ const figure=document.createElement('figure');
+ figure.className=original?'saved-print-figure saved-print-original':'saved-print-figure';
+ const image=await loadUrlImage(canvas.toDataURL('image/png'));
+ image.alt=caption;
+ const label=document.createElement('figcaption');label.textContent=caption;
+ figure.append(image,label);return figure;
+}
+function clearSavedPrintReport(){
+ document.body.classList.remove('printing-saved-analysis');
+ const report=$('savedAnalysisPrintReport');report.replaceChildren();report.setAttribute('aria-hidden','true');
+}
+window.addEventListener('afterprint',clearSavedPrintReport);
+$('printSavedAnalysis').onclick=async()=>{
+ if(!savedAnalysis||$('savedAnalysisPanel').classList.contains('hidden'))return alert('先に保存済み解析を開いてください。');
+ const generation=savedViewGeneration,button=$('printSavedAnalysis'),report=$('savedAnalysisPrintReport');
+ button.disabled=true;clearSavedPrintReport();
+ try{
+  const title=document.createElement('h1');title.textContent='保存済み解析の表示';
+  const meta=$('savedAnalysisMeta').cloneNode(true);meta.removeAttribute('id');meta.className='saved-print-meta';
+  const metrics=$('savedAnalysisMetrics').cloneNode(true);metrics.removeAttribute('id');metrics.className='saved-print-metrics';
+  const figures=document.createElement('div');figures.className='saved-print-figures';
+  const includeOriginal=$('savedOriginalToggle').checked;
+  const includeBinary=!$('savedBinaryFigure').classList.contains('hidden');
+  const resultOpacity=savedPrintOpacity($('savedResultOpacity').value),binaryOpacity=savedPrintOpacity($('savedBinaryOpacity').value);
+  const parameterTable=$('savedParameterTable').querySelector('table');
+  if(!parameterTable)throw new Error('解析条件が読み込まれていません。');
+  const conditions=document.createElement('section');conditions.className='saved-print-conditions';
+  const conditionTitle=document.createElement('h2');conditionTitle.textContent='保存された解析条件・ROI';
+  const table=document.createElement('table'),head=table.createTHead(),body=table.createTBody();
+  Array.from(parameterTable.rows).forEach((row,index)=>(index===0?head:body).appendChild(row.cloneNode(true)));
+  conditions.append(conditionTitle,table);
+  if(includeOriginal)figures.append(await savedPrintFigure(await savedPrintOriginal(),$('savedOriginalCaption').textContent,true));
+  figures.append(await savedPrintFigure(await savedPrintOverlay('savedResultBaseCanvas','savedResultImage',resultOpacity),'解析結果（検出結果の濃度 '+Math.round(resultOpacity*100)+'%）'));
+  if(includeBinary)figures.append(await savedPrintFigure(await savedPrintOverlay('savedBinaryBaseCanvas','savedBinaryImage',binaryOpacity),'二値化画像（濃度 '+Math.round(binaryOpacity*100)+'%／白＝空洞・黒＝生地・灰＝解析範囲外）'));
+  else{
+   const note=document.createElement('p');note.className='saved-print-note';note.textContent='二値化画像：保存された画像なし、または読み込み不可';figures.append(note);
+  }
+  if(generation!==savedViewGeneration)throw new Error('表示中の解析が変更されました。印刷し直してください。');
+  if(savedAnalysis.latest_correction_at){
+   const note=document.createElement('p');note.className='saved-print-note';
+   note.textContent='手動補正版の画像を表示しています。解析値は保存時の自動解析値です。';meta.append(note);
+  }
+  report.append(title,meta,metrics,figures,conditions);
+  report.setAttribute('aria-hidden','false');document.body.classList.add('printing-saved-analysis');
+  window.print();
+ }catch(e){clearSavedPrintReport();alert('印刷を準備できませんでした：'+e.message);}
+ finally{button.disabled=false;}
+};
+
 $('restoreForReanalysis').onclick=async()=>{
  if(!savedAnalysis||analysisRunning||manualSaving||deletionRunning)return;
  if(manualEdit.actions.length&&!confirm('未保存の手動補正を破棄しますか？'))return;
@@ -1123,7 +1217,7 @@ $('exportStatsXlsx').onclick=()=>{
  const workbook=XLSX.utils.book_new();[['記述統計',summary],['検定結果',tests],['ペア比較',pairs],['元データ',raw]].forEach(([name,rows])=>XLSX.utils.book_append_sheet(workbook,XLSX.utils.json_to_sheet(rows),name));
  XLSX.writeFile(workbook,`bread_statistics_${currentStats.metric}.xlsx`);
 };
-$('exportPdfReport').onclick=()=>{if(!currentStats)return alert('先に集計・検定を実行してください。');window.print();};
+$('exportPdfReport').onclick=()=>{if(!currentStats)return alert('先に集計・検定を実行してください。');clearSavedPrintReport();window.print();};
 $('restartWorker').onclick=async()=>{
  try{
    const d=await diagnosePython(true);
