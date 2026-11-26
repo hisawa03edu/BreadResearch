@@ -328,6 +328,7 @@ function loadRoiPreview(file,restoredRoi=undefined){
     roi=null;c.getContext('2d').drawImage(image,0,0);
     $('roiInfo').textContent='ROI未指定（パン全体を解析）';
    }else if(restoredRoi){
+    roi={...restoredRoi};
     $('roiWidth').value=restoredRoi.w;$('roiHeight').value=restoredRoi.h;
     $('roiX').value=restoredRoi.x;$('roiY').value=restoredRoi.y;
     drawFixedRoi();
