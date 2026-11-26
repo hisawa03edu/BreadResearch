@@ -11,7 +11,7 @@ if (file_exists($configFile)) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title><?= htmlspecialchars($appName, ENT_QUOTES, 'UTF-8') ?></title>
-<link rel="stylesheet" href="assets/style.css?v=10.6.0">
+<link rel="stylesheet" href="assets/style.css?v=10.6.0-delete1">
 </head>
 <body>
 <div id="loginView" class="center-card hidden">
@@ -93,7 +93,8 @@ if (file_exists($configFile)) {
       <button id="createTreatment" class="primary">試験区を追加</button>
     </div>
   </div>
-  <div class="card"><h2>登録済み試験</h2><div class="table-wrap"><table id="experimentTable"></table></div></div>
+  <div class="card"><h2>登録済み試験</h2><p class="small-note">解析データのない試験を削除できます。所属する空の試験区も削除します。解析データが残る試験は先にデータ一覧で整理してください。</p><div class="table-wrap"><table id="experimentTable"></table></div></div>
+  <div class="card"><h2>登録済み試験区</h2><p class="small-note">上の「試験区登録」で選択した試験の試験区を表示します。解析データのない試験区のみ削除できます。</p><div class="table-wrap"><table id="treatmentTable"></table></div></div>
 </section>
 
 <section id="tab-analyze" class="tab-panel hidden">
@@ -271,9 +272,10 @@ if (file_exists($configFile)) {
       <button id="selectFilteredSamples">検索結果をすべて選択</button>
       <button id="clearSelectedSamples">選択をすべて解除</button>
       <button id="editSelectedSamples" disabled>選択データの名称・試験区を修正</button>
+      <button id="deleteSelectedSamples" class="danger" type="button" disabled>選択データを削除</button>
       <button id="analyzeSelectedSamples" class="primary" disabled>選択したデータを統計処理</button>
     </div>
-    <p class="small-note">表の左端にチェックを付けて編集・統計処理の対象を選択します。ページを移動しても選択は保持されます。試験を変更すると選択は解除されます。</p>
+    <p class="small-note">表の左端にチェックを付けて編集・削除・統計処理の対象を選択します。ページを移動しても選択は保持されます。試験を変更すると選択は解除されます。</p>
     <div id="dataTableInfo" class="datatable-info"></div>
     <div class="table-wrap"><table id="samplesTable" class="datatable"></table></div>
     <div class="datatable-footer">
@@ -381,6 +383,6 @@ if (file_exists($configFile)) {
 
 <canvas id="workCanvas" class="hidden"></canvas>
 <script defer src="assets/vendor/xlsx.full.min.js"></script>
-<script defer src="assets/app.js?v=10.6.0-roi-sync1"></script>
+<script defer src="assets/app.js?v=10.6.0-delete1"></script>
 </body>
 </html>

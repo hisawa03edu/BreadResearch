@@ -416,6 +416,52 @@ function statsHolmPairs(array $groupRows, float $alpha): array {
     return $pairs;
 }
 
+function requireDeletePost(): void {
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') respond(['ok'=>false,'error'=>'POSTで実行してください。'],405);
+    $type = strtolower(trim(explode(';', (string)($_SERVER['CONTENT_TYPE'] ?? ''))[0]));
+    if ($type !== 'application/json') respond(['ok'=>false,'error'=>'JSONリクエストが必要です。'],415);
+}
+function positiveDeleteId($value): int {
+    if (!is_int($value) && (!is_string($value) || !preg_match('/^[1-9][0-9]*$/D',$value))) return 0;
+    $id = filter_var($value,FILTER_VALIDATE_INT,['options'=>['min_range'=>1]]);
+    return $id===false ? 0 : $id;
+}
+function safeSampleFile(string $relative): ?string {
+    if (!preg_match('#^uploads/(original|result|intermediate|corrected)/[A-Za-z0-9_-]+\.(png|jpe?g|webp)$#D',$relative,$match)) return null;
+    $directory = __DIR__.'/uploads/'.$match[1];
+    $path = __DIR__.'/'.$relative;
+    if (is_link(__DIR__.'/uploads') || is_link($directory) || is_link($path)) return null;
+    if (!is_file($path)) return '';
+    $root = realpath($directory);
+    $real = realpath($path);
+    return $root!==false && $real!==false && dirname($real)===$root ? $real : null;
+}
+function cleanupDeletedSampleFiles(PDO $pdo,array $paths,array $resultPaths): ?string {
+    $check = $pdo->prepare('SELECT 1 FROM samples WHERE original_image_path=? OR result_image_path=? OR bread_mask_path=? LIMIT 1');
+    $checkCorrection = $pdo->prepare('SELECT 1 FROM manual_corrections WHERE corrected_result_path=? LIMIT 1');
+    $warning = false;
+    $candidates = array_fill_keys($paths,true);
+    // Python assigns a unique result prefix. Enumerate only its known intermediate filenames.
+    $stages = ['gray','clahe','threshold','binary_area','morphology','measurement_mask','large_hole_contrast','large_hole_mask','final_mask','distance','watershed'];
+    foreach ($resultPaths as $resultPath) {
+        if (!preg_match('#^uploads/result/(analysis_[0-9]{8}_[0-9]{6}_[a-f0-9]{8})_overlay\.png$#D',$resultPath,$m)) continue;
+        $check->execute([$resultPath,$resultPath,$resultPath]);
+        if ($check->fetchColumn()) continue;
+        foreach ($stages as $stage) $candidates['uploads/intermediate/'.$m[1].'_'.$stage.'.png']=true;
+    }
+    foreach (array_keys($candidates) as $relative) {
+        $path = safeSampleFile($relative);
+        if ($path === null) { $warning=true; continue; }
+        if ($path === '') continue;
+        $check->execute([$relative,$relative,$relative]);
+        if ($check->fetchColumn()) continue;
+        $checkCorrection->execute([$relative]);
+        if ($checkCorrection->fetchColumn()) continue;
+        if (!@unlink($path)) $warning=true;
+    }
+    return $warning ? '解析データは削除しましたが、一部の画像ファイルは安全のため残したか、削除できませんでした。' : null;
+}
+
 $action = $_GET['action'] ?? '';
 $input = body();
 
@@ -465,7 +511,7 @@ try {
 
     if ($action === 'treatments') {
         $eid = (int)($_GET['experiment_id'] ?? 0);
-        $st = $pdo->prepare("SELECT * FROM treatments WHERE experiment_id=? ORDER BY display_order,name");
+        $st = $pdo->prepare("SELECT t.*, (SELECT COUNT(*) FROM samples s WHERE s.treatment_id=t.id) sample_count FROM treatments t WHERE t.experiment_id=? ORDER BY t.display_order,t.name");
         $st->execute([$eid]);
         respond(['ok' => true, 'items' => $st->fetchAll()]);
     }
@@ -477,6 +523,45 @@ try {
         $st = $pdo->prepare("INSERT INTO treatments(experiment_id,name,display_order,description) VALUES(?,?,?,?)");
         $st->execute([$eid, $name, (int)($input['display_order'] ?? 1), $input['description'] ?? '']);
         respond(['ok' => true, 'id' => (int)$pdo->lastInsertId()]);
+    }
+
+    // Parent deletion is allowed only after all research samples have been removed explicitly.
+    if ($action === 'delete_experiment' || $action === 'delete_treatment') {
+        requireDeletePost();
+        $experiment = $action === 'delete_experiment';
+        $id = positiveDeleteId($input[$experiment ? 'experiment_id' : 'treatment_id'] ?? null);
+        if (!$id) respond(['ok'=>false,'error'=>'削除対象が正しくありません。'],422);
+        $pdo->beginTransaction();
+        $table = $experiment ? 'experiments' : 'treatments';
+        $st = $pdo->prepare("SELECT id,name FROM $table WHERE id=? FOR UPDATE");
+        $st->execute([$id]);
+        if (!$st->fetch()) {
+            $pdo->rollBack();
+            respond(['ok'=>false,'error'=>'削除対象が見つかりません。画面を更新してください。'],404);
+        }
+        if ($experiment) {
+            $st = $pdo->prepare('SELECT id FROM treatments WHERE experiment_id=? FOR UPDATE');
+            $st->execute([$id]);
+            $treatmentCount = count($st->fetchAll());
+            $st = $pdo->prepare('SELECT s.id FROM samples s WHERE s.experiment_id=? OR s.treatment_id IN (SELECT t.id FROM treatments t WHERE t.experiment_id=?) LIMIT 1 FOR UPDATE');
+            $st->execute([$id,$id]);
+        } else {
+            $treatmentCount = 0;
+            $st = $pdo->prepare('SELECT id FROM samples WHERE treatment_id=? LIMIT 1 FOR UPDATE');
+            $st->execute([$id]);
+        }
+        if ($st->fetch()) {
+            $pdo->rollBack();
+            respond(['ok'=>false,'error'=>'解析データが残っています。データ一覧から不要なデータを削除するか、別の試験区へ移動してから削除してください。'],409);
+        }
+        if ($experiment && (!isset($input['expected_treatment_count']) || !is_int($input['expected_treatment_count']) || $input['expected_treatment_count'] !== $treatmentCount)) {
+            $pdo->rollBack();
+            respond(['ok'=>false,'error'=>'試験区数が変更されました。画面を更新してから削除してください。'],409);
+        }
+        $st = $pdo->prepare("DELETE FROM $table WHERE id=?");
+        $st->execute([$id]);
+        $pdo->commit();
+        respond(['ok'=>true,'deleted_count'=>1,'deleted_treatment_count'=>$treatmentCount]);
     }
 
     if ($action === 'update_samples') {
@@ -777,22 +862,59 @@ try {
         respond(['ok' => true, 'items' => $st->fetchAll()]);
     }
 
-    if ($action === 'delete_sample') {
-        $sid = (int)($input['sample_id'] ?? 0);
-        $st = $pdo->prepare("SELECT original_image_path,result_image_path,bread_mask_path FROM samples WHERE id=?");
-        $st->execute([$sid]);
-        $row = $st->fetch();
-        if ($row) {
-            foreach (['original_image_path','result_image_path','bread_mask_path'] as $k) {
-                if (!empty($row[$k])) {
-                    $path = __DIR__ . '/' . $row[$k];
-                    if (is_file($path)) @unlink($path);
-                }
-            }
-            $del = $pdo->prepare("DELETE FROM samples WHERE id=?");
-            $del->execute([$sid]);
+    if ($action === 'delete_sample' || $action === 'delete_samples') {
+        requireDeletePost();
+        $bulk = $action === 'delete_samples';
+        $rawIds = $bulk ? ($input['sample_ids'] ?? null) : [$input['sample_id'] ?? null];
+        $eid = positiveDeleteId($input['experiment_id'] ?? null);
+        if (!is_array($rawIds) || !$rawIds || count($rawIds)>500 || ($bulk && !$eid)) {
+            respond(['ok'=>false,'error'=>'削除対象を1～500件選択してください。'],422);
         }
-        respond(['ok' => true]);
+        $ids = [];
+        foreach ($rawIds as $rawId) {
+            $id = positiveDeleteId($rawId);
+            if (!$id) respond(['ok'=>false,'error'=>'削除対象が正しくありません。'],422);
+            $ids[$id] = $id;
+        }
+        $ids = array_values($ids);
+        sort($ids);
+        $marks = implode(',', array_fill(0,count($ids),'?'));
+        $pdo->beginTransaction();
+        $st = $pdo->prepare("SELECT id,experiment_id,original_image_path,result_image_path,bread_mask_path FROM samples WHERE id IN ($marks) ORDER BY id FOR UPDATE");
+        $st->execute($ids);
+        $rows = $st->fetchAll();
+        if (count($rows)!==count($ids) || ($eid && array_filter($rows,static fn($row)=>(int)$row['experiment_id']!==$eid))) {
+            $pdo->rollBack();
+            respond(['ok'=>false,'error'=>'削除対象が変更されました。データ一覧を更新して選び直してください。'],409);
+        }
+        $paths = [];
+        $resultPaths = [];
+        foreach ($rows as $row) {
+            foreach (['original_image_path','result_image_path','bread_mask_path'] as $key) {
+                if (!empty($row[$key])) $paths[(string)$row[$key]]=true;
+            }
+            if (!empty($row['result_image_path'])) $resultPaths[(string)$row['result_image_path']]=true;
+        }
+        $st = $pdo->prepare("SELECT corrected_result_path FROM manual_corrections WHERE sample_id IN ($marks) FOR UPDATE");
+        $st->execute($ids);
+        foreach ($st->fetchAll() as $row) {
+            if (!empty($row['corrected_result_path'])) $paths[(string)$row['corrected_result_path']]=true;
+        }
+        // Foreign keys delete only holes and corrections belonging to the selected samples.
+        // Leave the parent_sample_id of remaining revisions unchanged: it is their lineage key.
+        $st = $pdo->prepare("DELETE FROM samples WHERE id IN ($marks)");
+        $st->execute($ids);
+        $deleted = $st->rowCount();
+        $pdo->commit();
+        $warning = null;
+        try {
+            // Files are removed only after the database commit, and only if no surviving row references them.
+            $warning = cleanupDeletedSampleFiles($pdo,array_keys($paths),array_keys($resultPaths));
+        } catch (Throwable $cleanupError) {
+            error_log('BreadResearch image cleanup failed: '.$cleanupError->getMessage());
+            $warning = '解析データは削除しましたが、一部の画像ファイルを整理できませんでした。';
+        }
+        respond(['ok'=>true,'deleted_count'=>$deleted,'warning'=>$warning]);
     }
 
     respond(['ok' => false, 'error' => '不明な操作です。'], 404);

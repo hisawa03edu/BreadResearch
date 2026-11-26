@@ -5,6 +5,9 @@ on:
     paths:
       - 'assets/app.js'
       - 'index.php'
+      - 'api.php'
+      - 'assets/style.css'
+      - '.github/tests/delete-management.py'
       - '.github/tests/roi-sync.test.cjs'
       - '.github/workflows/check-source.yml'
   workflow_dispatch:
@@ -22,4 +25,42 @@ jobs:
           node --check assets/app.js
           node --test .github/tests/roi-sync.test.cjs
       - name: Check PHP syntax
-        run: php -l index.php
+        run: |
+          php -l index.php
+          php -l api.php
+
+  deletion-integration:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: test-root
+          MYSQL_DATABASE: bread_test
+          MYSQL_USER: bread_test
+          MYSQL_PASSWORD: test-db
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up isolated test database
+        run: |
+          set -euo pipefail
+          if ! php -m | grep -qi '^pdo_mysql$'; then
+            sudo apt-get update -qq
+            sudo apt-get install -y php-mysql
+          fi
+          cat > config.php <<'PHP'
+          <?php
+          return ['db'=>['host'=>'127.0.0.1','name'=>'bread_test','user'=>'bread_test','pass'=>'test-db','charset'=>'utf8mb4'],'login_password_plain'=>'test-only','app_name'=>'test','app_version'=>'10.6.0'];
+          PHP
+          php -r '$c=require "config.php";$d=$c["db"];$p=new PDO("mysql:host=".$d["host"].";dbname=".$d["name"],$d["user"],$d["pass"]);foreach(explode(";",file_get_contents("schema.sql")) as $sql){if(trim($sql)!=="")$p->exec($sql);}'
+      - name: Exercise deletion API
+        run: |
+          php -S 127.0.0.1:8765 > /tmp/bread-php-test.log 2>&1 &
+          python3 .github/tests/delete-management.py || { cat /tmp/bread-php-test.log; exit 1; }
