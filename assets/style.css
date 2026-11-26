@@ -123,3 +123,5 @@ button:disabled{opacity:.55;cursor:not-allowed}.hidden{display:none!important}.c
 .thumbnail-button:hover{background:#eef6fc}
 .sample-thumbnail{display:block;width:108px;height:78px;object-fit:contain;background:#222;border-radius:4px}
 .thumbnail-empty{color:#7b8794}
+
+button.danger{color:#a51d1d;border-color:#d6a3a3;background:#fff}button.danger:hover:not(:disabled){background:#fce8e8}button.danger:disabled{opacity:.45;cursor:not-allowed}
