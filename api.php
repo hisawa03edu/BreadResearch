@@ -525,6 +525,31 @@ try {
         respond(['ok' => true, 'id' => (int)$pdo->lastInsertId()]);
     }
 
+    if ($action === 'update_treatment') {
+        requireDeletePost();
+        $id = positiveDeleteId($input['treatment_id'] ?? null);
+        $eid = positiveDeleteId($input['experiment_id'] ?? null);
+        $name = is_string($input['name'] ?? null) ? trim($input['name']) : '';
+        $length = function_exists('mb_strlen') ? mb_strlen($name,'UTF-8') : preg_match_all('/./us',$name);
+        $rawOrder = $input['display_order'] ?? null;
+        $order = (is_int($rawOrder) || is_string($rawOrder)) ? filter_var($rawOrder,FILTER_VALIDATE_INT,['options'=>['min_range'=>-2147483648,'max_range'=>2147483647]]) : false;
+        $description = $input['description'] ?? '';
+        if (!$id || !$eid || $name==='' || $length>200 || $order===false || !is_string($description) || strlen($description)>65535) {
+            respond(['ok'=>false,'error'=>'試験区名（200文字以内）、整数の表示順、説明を確認してください。'],422);
+        }
+        $pdo->beginTransaction();
+        $st = $pdo->prepare('SELECT id FROM treatments WHERE id=? AND experiment_id=? FOR UPDATE');
+        $st->execute([$id,$eid]);
+        if (!$st->fetch()) {
+            $pdo->rollBack();
+            respond(['ok'=>false,'error'=>'対象の試験区が見つかりません。'],404);
+        }
+        $st = $pdo->prepare('UPDATE treatments SET name=?,display_order=?,description=? WHERE id=? AND experiment_id=?');
+        $st->execute([$name,$order,$description,$id,$eid]);
+        $pdo->commit();
+        respond(['ok'=>true,'id'=>$id]);
+    }
+
     // Parent deletion is allowed only after all research samples have been removed explicitly.
     if ($action === 'delete_experiment' || $action === 'delete_treatment') {
         requireDeletePost();
@@ -887,11 +912,11 @@ try {
 
     if ($action === 'samples') {
         $eid = (int)($_GET['experiment_id'] ?? 0);
-        $st = $pdo->prepare("SELECT s.*, t.name treatment_name,
+        $st = $pdo->prepare("SELECT s.*, t.name treatment_name,t.display_order treatment_display_order,
             (SELECT mc.corrected_result_path FROM manual_corrections mc
              WHERE mc.sample_id=s.id ORDER BY mc.created_at DESC,mc.id DESC LIMIT 1) latest_corrected_result_path
             FROM samples s JOIN treatments t ON t.id=s.treatment_id
-            WHERE s.experiment_id=? ORDER BY t.display_order,s.sample_code,s.id");
+            WHERE s.experiment_id=? ORDER BY t.display_order,t.name,s.sample_code,s.id");
         $st->execute([$eid]);
         respond(['ok' => true, 'items' => $st->fetchAll()]);
     }

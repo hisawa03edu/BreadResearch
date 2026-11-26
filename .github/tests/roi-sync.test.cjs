@@ -206,3 +206,24 @@ test('preset apply, overwrite, save-as and delete use stable IDs and preserve ot
  assert.equal($('deletePreset').disabled,true);
  assert.equal($('updatePreset').disabled,true);
 });
+
+
+test('sample sorting supports numeric treatment order and natural names',()=>{
+ const sandbox={};vm.createContext(sandbox);
+ vm.runInContext(between('function compareValues','function formatCell'),sandbox);
+ const rows=[{id:1,treatment_display_order:10,treatment_name:'10回区',sample_code:'A1',revision_no:1},{id:2,treatment_display_order:2,treatment_name:'2回区',sample_code:'A10',revision_no:1},{id:3,treatment_display_order:2,treatment_name:'2回区',sample_code:'A2',revision_no:1}];
+ const sorted=(key,type,direction)=>[...rows].sort((a,b)=>sandbox.compareSampleRows(a,b,{key,type},direction)).map(x=>x.id);
+ assert.deepEqual(sorted('treatment_display_order','number','asc'),[3,2,1]);
+ assert.deepEqual(sorted('treatment_display_order','number','desc'),[1,3,2]);
+ assert.deepEqual(sorted('treatment_name','text','asc'),[3,2,1]);
+ assert.deepEqual(sorted('sample_code','text','asc'),[1,3,2]);
+ assert.deepEqual(sorted('sample_code','text','desc'),[2,3,1]);
+});
+test('registered treatments can be edited and all sample sort options are accessible',()=>{
+ const html=fs.readFileSync('index.php','utf8');
+ assert.match(source,/data-edit-treatment/);
+ assert.match(source,/api\('update_treatment'/);
+ assert.match(source,/treatment_display_order',label:'表示順',type:'number',visible:true/);
+ assert.match(source,/syncSampleSortControls\(\)/);
+ for(const id of ['editTreatName','editTreatOrder','editTreatDescription','saveTreatmentEdit','dataSortKey','dataSortDirection'])assert.ok(html.includes('id="'+id+'"'));
+});

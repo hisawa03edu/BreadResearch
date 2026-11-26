@@ -118,3 +118,33 @@ call('update_preset',{'preset_id':p1,'parameters':{'dpi':300}},404)
 call('delete_preset',{'preset_id':p1},404)
 assert [int(p['id']) for p in call('presets')['items']]==[p2]
 print('Preset integration checks passed.')
+
+
+# Treatment metadata editing retains sample IDs, images and measured values.
+e=experiment('Treatment editing')
+other_e=experiment('Other experiment')
+ta=treatment(e,'10回区')
+tb=treatment(e,'2回区')
+sa=sample(e,ta,'A2')
+sb=sample(e,tb,'A10')
+before={int(x['id']):x for x in samples(e)}
+payload={'treatment_id':ta,'experiment_id':e,'name':'3回区','display_order':10,'description':'粉砕3回'}
+call('update_treatment',{**payload,'experiment_id':other_e},404)
+call('update_treatment',{**payload,'display_order':1.5},422)
+call('update_treatment',{**payload,'name':''},422)
+call('update_treatment',status=405)
+assert call('update_treatment',payload)['id']==ta
+call('update_treatment',{'treatment_id':tb,'experiment_id':e,'name':'2回区','display_order':2,'description':'粉砕2回'})
+updated=call('treatments',query='&experiment_id='+str(e))['items']
+assert [int(x['id']) for x in updated]==[tb,ta]
+assert updated[1]['name']=='3回区' and updated[1]['description']=='粉砕3回'
+after=samples(e)
+assert [int(x['id']) for x in after]==[sb,sa]
+assert [int(x['treatment_display_order']) for x in after]==[2,10]
+assert after[1]['treatment_name']=='3回区'
+for row in after:
+    previous=before[int(row['id'])]
+    for key in ['treatment_id','sample_code','hole_count','hole_area_mm2','parameter_json','roi_json','original_image_path','result_image_path']:
+        assert row[key]==previous[key],key
+assert len(call('holes',query='&sample_id='+str(sa))['items'])==1
+print('Treatment editing and sample display order integration checks passed.')

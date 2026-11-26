@@ -11,7 +11,7 @@ if (file_exists($configFile)) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title><?= htmlspecialchars($appName, ENT_QUOTES, 'UTF-8') ?></title>
-<link rel="stylesheet" href="assets/style.css?v=10.6.0-presets1">
+<link rel="stylesheet" href="assets/style.css?v=10.6.0-treatment-sort1">
 </head>
 <body>
 <div id="loginView" class="center-card hidden">
@@ -94,7 +94,13 @@ if (file_exists($configFile)) {
     </div>
   </div>
   <div class="card"><h2>登録済み試験</h2><p class="small-note">解析データのない試験を削除できます。所属する空の試験区も削除します。解析データが残る試験は先にデータ一覧で整理してください。</p><div class="table-wrap"><table id="experimentTable"></table></div></div>
-  <div class="card"><h2>登録済み試験区</h2><p class="small-note">上の「試験区登録」で選択した試験の試験区を表示します。解析データのない試験区のみ削除できます。</p><div class="table-wrap"><table id="treatmentTable"></table></div></div>
+  <div class="card"><h2>登録済み試験区</h2><p class="small-note">上の「試験区登録」で選択した試験の試験区を表示します。修正は解析データがある試験区でも可能です。削除は解析データのない試験区のみ可能です。</p><div class="table-wrap"><table id="treatmentTable"></table></div>
+    <div id="treatmentEditPanel" class="hidden" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--line)">
+      <h3>試験区の修正</h3>
+      <div class="form-grid"><label>試験区名<input id="editTreatName" maxlength="200"></label><label>表示順<input id="editTreatOrder" type="number" step="1" min="-2147483648" max="2147483647"></label><label class="span2">説明<textarea id="editTreatDescription"></textarea></label></div>
+      <div class="editor-actions"><button id="saveTreatmentEdit" type="button" class="primary">変更を保存</button><button id="cancelTreatmentEdit" type="button">キャンセル</button><span id="treatmentEditStatus" role="status"></span></div>
+    </div>
+  </div>
 </section>
 
 <section id="tab-analyze" class="tab-panel hidden">
@@ -271,6 +277,7 @@ if (file_exists($configFile)) {
       <button id="exportSamplesCsv">表示中CSV</button>
       <button id="exportSamplesXlsx">表示中Excel</button>
     </div>
+    <div class="sample-sort-toolbar"><label>並べ替え項目<select id="dataSortKey"></select></label><label>並べ替え方向<select id="dataSortDirection"><option value="asc">昇順</option><option value="desc">降順</option></select></label><span class="small-note">表示順は試験区に登録された番号です。列見出しからも並べ替えできます。</span></div>
     <div class="thumbnail-toolbar">
       <label class="inline-check"><input id="dataThumbnailToggle" type="checkbox"> サムネイルを表示（元画像・解析結果）</label>
       <span class="small-note">OFF時は画像を読み込まないため、一覧を軽く表示できます。</span>
@@ -392,6 +399,6 @@ if (file_exists($configFile)) {
 <section id="savedAnalysisPrintReport" class="saved-analysis-print-report" aria-hidden="true"></section>
 <canvas id="workCanvas" class="hidden"></canvas>
 <script defer src="assets/vendor/xlsx.full.min.js"></script>
-<script defer src="assets/app.js?v=10.6.0-presets1"></script>
+<script defer src="assets/app.js?v=10.6.0-treatment-sort1"></script>
 </body>
 </html>

@@ -21,6 +21,7 @@ let selectedExperimentId=null;
 let currentStats=null;
 let deletionRunning=false,managementLoadGeneration=0,samplesLoadGeneration=0,statsGeneration=0;
 let sampleEditGeneration=0,sampleEditSaving=false,sampleEditExperiment=null;
+let treatmentEditTarget=null,treatmentEditSaving=false;
 let breadMaskStateCanvas=null,breadMaskOriginalDataUrl=null,breadMaskPrepared=null,breadMaskEditMode='add';
 let engineReady=false;
 let activeAnalysisController=null;
@@ -277,14 +278,52 @@ async function refreshManagedTreatments(){
  if(!eid)return;
  const items=(await api('treatments',{query:`&experiment_id=${eid}`})).items;
  if(generation!==managementLoadGeneration||$('treatExperiment').value!==eid)return;
- table.innerHTML=header+(items.length?items.map(t=>`<tr><td>${esc(t.name)}</td><td>${esc(t.display_order)}</td><td>${esc(t.description)}</td><td>${t.sample_count}</td><td><button type="button" class="danger" data-delete-treatment="${t.id}" ${Number(t.sample_count)>0?'disabled title="解析データを先に削除または移動してください"':''}>削除</button></td></tr>`).join(''):'<tr><td colspan="5">登録済みの試験区はありません。</td></tr>');
+ table.innerHTML=header+(items.length?items.map(t=>`<tr><td>${esc(t.name)}</td><td>${esc(t.display_order)}</td><td>${esc(t.description)}</td><td>${t.sample_count}</td><td><button type="button" data-edit-treatment="${t.id}">修正</button> <button type="button" class="danger" data-delete-treatment="${t.id}" ${Number(t.sample_count)>0?'disabled title="解析データを先に削除または移動してください"':''}>削除</button></td></tr>`).join(''):'<tr><td colspan="5">登録済みの試験区はありません。</td></tr>');
+ table.querySelectorAll('[data-edit-treatment]').forEach(btn=>btn.onclick=()=>openTreatmentEditor(items.find(t=>String(t.id)===btn.dataset.editTreatment)));
  table.querySelectorAll('[data-delete-treatment]').forEach(btn=>btn.onclick=()=>deleteTreatment(items.find(t=>String(t.id)===btn.dataset.deleteTreatment)));
 }
 $('analysisExperiment').onchange=refreshTreatments;
-$('treatExperiment').onchange=()=>refreshManagedTreatments().catch(e=>alert(e.message));
+$('treatExperiment').onchange=()=>{closeTreatmentEditor();refreshManagedTreatments().catch(e=>alert(e.message));};
+function closeTreatmentEditor(){
+ treatmentEditTarget=null;
+ $('treatmentEditPanel').classList.add('hidden');
+ $('treatmentEditStatus').textContent='';
+}
+function openTreatmentEditor(t){
+ if(!t||treatmentEditSaving||deletionRunning)return;
+ if(treatmentEditTarget&&!confirm('編集中の内容を破棄しますか？'))return;
+ treatmentEditTarget={id:Number(t.id),experimentId:Number(t.experiment_id)};
+ $('editTreatName').value=t.name;
+ $('editTreatOrder').value=t.display_order;
+ $('editTreatDescription').value=t.description||'';
+ $('treatmentEditStatus').textContent='修正対象：'+t.name;
+ $('treatmentEditPanel').classList.remove('hidden');
+ $('treatmentEditPanel').scrollIntoView({behavior:'smooth',block:'nearest'});
+ $('editTreatName').focus({preventScroll:true});
+}
+$('cancelTreatmentEdit').onclick=()=>{if(!treatmentEditSaving)closeTreatmentEditor();};
+$('saveTreatmentEdit').onclick=async()=>{
+ if(!treatmentEditTarget||treatmentEditSaving||deletionRunning)return;
+ const target={...treatmentEditTarget};
+ const name=$('editTreatName').value.trim(),raw=$('editTreatOrder').value,order=Number(raw),description=$('editTreatDescription').value;
+ if(!name||name.length>200||raw.trim()===''||!Number.isInteger(order)||order< -2147483648||order>2147483647)return alert('試験区名と整数の表示順を確認してください。');
+ if(target.experimentId!==Number($('treatExperiment').value))return alert('試験が変更されました。選び直してください。');
+ treatmentEditSaving=true;
+ ['saveTreatmentEdit','cancelTreatmentEdit','treatExperiment','createTreatment'].forEach(id=>$(id).disabled=true);
+ try{
+  await api('update_treatment',{method:'POST',body:{treatment_id:target.id,experiment_id:target.experimentId,name,display_order:order,description}});
+  closeTreatmentEditor();invalidateStats();
+  ++savedViewGeneration;$('savedAnalysisPanel').classList.add('hidden');savedAnalysis=null;clearSavedOriginalRange();
+  closeSampleEditor();
+  try{await refreshExperiments();await Promise.all([loadSamples(),loadDashboard()]);}
+  catch(e){alert('保存しましたが画面の更新に失敗しました。再読み込みしてください。');return;}
+  alert('試験区を修正しました。');
+ }catch(e){$('treatmentEditStatus').textContent='保存できませんでした：'+e.message;alert(e.message);}
+ finally{treatmentEditSaving=false;['saveTreatmentEdit','cancelTreatmentEdit','treatExperiment'].forEach(id=>$(id).disabled=false);$('createTreatment').disabled=!experiments.length;}
+};
 function canDelete(){
  if(deletionRunning)return false;
- if(sampleEditSaving){alert('サンプルの修正保存が完了してから削除してください。');return false;}
+ if(sampleEditSaving||treatmentEditSaving){alert('修正保存が完了してから削除してください。');return false;}
  if(analysisRunning||manualSaving){alert('画像解析または手動補正の保存が完了してから削除してください。');return false;}
  return true;
 }
@@ -297,7 +336,7 @@ function invalidateStats(){
 async function refreshAfterDeletion(){
  invalidateStats();
  $('holesTable').innerHTML='';
- closeSampleEditor();
+ closeSampleEditor();closeTreatmentEditor();
  ++savedViewGeneration;if(savedAnalysis){$('savedAnalysisPanel').classList.add('hidden');savedAnalysis=null;clearSavedOriginalRange();}
  await refreshExperiments();
  await Promise.all([loadSamples(),loadDashboard()]);
@@ -335,7 +374,7 @@ async function deleteTreatment(t){
  await performDeletion('delete_treatment',{treatment_id:Number(t.id)},()=> '試験区を削除しました。');
 }
 $('createExperiment').onclick=async()=>{try{await api('create_experiment',{method:'POST',body:{name:$('expName').value,objective:$('expObjective').value,researcher:$('expResearcher').value,institution:$('expInstitution').value,start_date:$('expStartDate').value,notes:$('expNotes').value}});await refreshExperiments();alert('登録しました')}catch(e){alert(e.message)}};
-$('createTreatment').onclick=async()=>{try{await api('create_treatment',{method:'POST',body:{experiment_id:$('treatExperiment').value,name:$('treatName').value,display_order:num('treatOrder'),description:$('treatDescription').value}});await refreshTreatments();alert('登録しました')}catch(e){alert(e.message)}};
+$('createTreatment').onclick=async()=>{try{await api('create_treatment',{method:'POST',body:{experiment_id:$('treatExperiment').value,name:$('treatName').value,display_order:num('treatOrder'),description:$('treatDescription').value}});await refreshExperiments();alert('登録しました')}catch(e){alert(e.message)}};
 function presetEntries(){
  return [...Object.entries(builtinPresets).map(([name,parameters])=>({key:'builtin:'+name,name,parameters,builtin:true})),...serverPresets.values()];
 }
@@ -698,6 +737,7 @@ $('runAnalysis').onclick=async()=>{
 
 const sampleColumns=[
  {key:'treatment_name',label:'試験区',type:'text',visible:true},
+ {key:'treatment_display_order',label:'表示順',type:'number',visible:true},
  {key:'sample_code',label:'サンプル',type:'text',visible:true},
  {key:'replicate_no',label:'反復',type:'text',visible:true},
  {key:'bread_type',label:'パン種類',type:'text',visible:false},
@@ -733,6 +773,9 @@ function initDataTableState(){
      dataTableState={...dataTableState,...v,visibleColumns:{...dataTableState.visibleColumns,...(v.visibleColumns||{})}};
    }catch(e){}
  }
+ if(!sampleColumns.some(c=>c.key===dataTableState.sortKey))dataTableState.sortKey='treatment_display_order';
+ $('dataSortKey').innerHTML=sampleColumns.map(c=>`<option value="${c.key}">${esc(c.label)}</option>`).join('');
+ syncSampleSortControls();
  $('dataSearch').value=dataTableState.search||'';
  $('dataPageSize').value=String(dataTableState.pageSize||50);
  if($('dataThumbnailToggle'))$('dataThumbnailToggle').checked=!!dataTableState.showThumbnails;
@@ -751,11 +794,17 @@ function compareValues(a,b,type){
  return String(a??'').localeCompare(String(b??''),'ja',{numeric:true,sensitivity:'base'});
 }
 function getVisibleSampleColumns(){return sampleColumns.filter(c=>dataTableState.visibleColumns[c.key]);}
+function syncSampleSortControls(){
+ $('dataSortKey').value=dataTableState.sortKey;$('dataSortDirection').value=dataTableState.sortDir;
+}
+function compareSampleRows(a,b,col,direction){
+ return compareValues(a[col.key],b[col.key],col.type)*(direction==='asc'?1:-1)||compareValues(a.treatment_display_order,b.treatment_display_order,'number')||compareValues(a.treatment_name,b.treatment_name,'text')||compareValues(a.sample_code,b.sample_code,'text')||compareValues(a.revision_no,b.revision_no,'number')||compareValues(a.id,b.id,'number');
+}
 function getFilteredSortedSamples(){
  const q=(dataTableState.search||'').trim().toLowerCase();
  let rows=currentSamples.filter(s=>!q||sampleColumns.some(c=>String(s[c.key]??'').toLowerCase().includes(q)));
  const col=sampleColumns.find(c=>c.key===dataTableState.sortKey)||sampleColumns[0];
- rows.sort((a,b)=>compareValues(a[col.key],b[col.key],col.type)*(dataTableState.sortDir==='asc'?1:-1));
+ rows.sort((a,b)=>compareSampleRows(a,b,col,dataTableState.sortDir));
  return rows;
 }
 function formatCell(v,type){
@@ -784,7 +833,7 @@ function renderSamplesTable(){
  $('samplesTable').querySelectorAll('th.sortable').forEach(th=>th.onclick=()=>{
    const key=th.dataset.sort;if(dataTableState.sortKey===key)dataTableState.sortDir=dataTableState.sortDir==='asc'?'desc':'asc';
    else{dataTableState.sortKey=key;dataTableState.sortDir='asc';}
-   dataTableState.page=1;saveDataTableState();renderSamplesTable();
+   syncSampleSortControls();dataTableState.page=1;saveDataTableState();renderSamplesTable();
  });
  const pageCheckbox=$('selectPageSamples');
  if(pageCheckbox){
@@ -824,6 +873,8 @@ async function loadSamples(){
  dataTableState.page=1;renderSamplesTable();
 }
 $('dataExperiment').onchange=()=>{closeSampleEditor();loadSamples().catch(e=>alert(e.message));};
+$('dataSortKey').onchange=e=>{dataTableState.sortKey=e.target.value;dataTableState.sortDir='asc';syncSampleSortControls();dataTableState.page=1;renderSamplesTable();};
+$('dataSortDirection').onchange=e=>{dataTableState.sortDir=e.target.value;dataTableState.page=1;renderSamplesTable();};
 $('dataSearch').oninput=e=>{dataTableState.search=e.target.value;dataTableState.page=1;renderSamplesTable();};
 $('dataPageSize').onchange=e=>{dataTableState.pageSize=e.target.value==='all'?'all':Number(e.target.value);dataTableState.page=1;renderSamplesTable();};
 $('dataThumbnailToggle').onchange=e=>{dataTableState.showThumbnails=!!e.target.checked;saveDataTableState();renderSamplesTable();};
