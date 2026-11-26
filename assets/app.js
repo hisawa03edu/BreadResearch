@@ -1,7 +1,7 @@
 const $=id=>document.getElementById(id);
 let experiments=[],currentSamples=[],roi=null,roiImage=null,serverPresets={},rerunMeta=null;
 let manualEdit={sampleId:null,baseImage:null,actions:[]};
-let savedAnalysis=null;
+let savedAnalysis=null,savedViewGeneration=0;
 let rerunFile=null;
 let roiPreviewFile=null,roiPreviewPromise=null,roiPreviewGeneration=0;
 let analysisRunning=false,manualEditorGeneration=0,manualSaving=false;
@@ -295,7 +295,7 @@ async function refreshAfterDeletion(){
  invalidateStats();
  $('holesTable').innerHTML='';
  $('selectedSampleEditPanel').classList.add('hidden');
- if(savedAnalysis){$('savedAnalysisPanel').classList.add('hidden');savedAnalysis=null;}
+ ++savedViewGeneration;if(savedAnalysis){$('savedAnalysisPanel').classList.add('hidden');savedAnalysis=null;clearSavedOriginalRange();}
  await refreshExperiments();
  await Promise.all([loadSamples(),loadDashboard()]);
 }
@@ -814,23 +814,86 @@ document.addEventListener('change',event=>{
  if(originalFigure)originalFigure.classList.toggle('hidden',!event.target.checked);
 });
 function loadUrlImage(url){return new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(new Error('比較用画像を読み込めません。'));image.src=url;});}
-async function prepareSavedResultBase(originalUrl,resultUrl,parametersData,roiData){
- const [original,result]=await Promise.all([loadUrlImage(originalUrl),loadUrlImage(resultUrl)]),canvas=$('savedResultBaseCanvas'),context=canvas.getContext('2d');
+function savedRoiRectangle(roiData,width,height){
+ if(!roiData||typeof roiData!=='object')return null;
+ const keys=['x','y','w','h'];
+ if(keys.some(k=>roiData[k]===null||roiData[k]===undefined||roiData[k]===''||!Number.isFinite(Number(roiData[k]))))return null;
+ const x=Number(roiData.x),y=Number(roiData.y),w=Number(roiData.w),h=Number(roiData.h);
+ if(w<=0||h<=0||x<0||y<0||x>=width||y>=height||x+w>width||y+h>height)return null;
+ return {x,y,w,h};
+}
+function savedRoiPercent(rect,width,height){
+ return {left:rect.x/width*100,top:rect.y/height*100,width:rect.w/width*100,height:rect.h/height*100};
+}
+function savedMaskSelected(red,alpha,kind){
+ return alpha>127&&(kind==='binary'?(red===0||red===255):red>127);
+}
+function clearSavedOriginalRange(){
+ $('savedRoiRect').classList.add('hidden');
+ $('savedRoiMask').classList.add('hidden');
+ $('savedOriginalCaption').textContent='元画像';
+}
+async function showSavedOriginalRange(s,p,roiData,width,height,generation){
+ if(generation!==savedViewGeneration)return;
+ clearSavedOriginalRange();
+ const caption=$('savedOriginalCaption'),rectElement=$('savedRoiRect'),canvas=$('savedRoiMask');
+ if((p.analysis_scope||roiData?.mode||'rectangle')!=='bread'){
+  const rect=savedRoiRectangle(roiData,width,height);
+  if(!rect){caption.textContent='元画像（保存されたROI座標なし・または範囲不正）';return;}
+  const percent=savedRoiPercent(rect,width,height);
+  for(const [key,value] of Object.entries(percent))rectElement.style[key]=value+'%';
+  rectElement.classList.remove('hidden');
+  caption.textContent=(rect.x===0&&rect.y===0&&rect.w===width&&rect.h===height?'元画像（画像全体がROI）':'元画像（黄色枠：解析に使用したROI）')+` X=${rect.x}、Y=${rect.y}、W=${rect.w}、H=${rect.h} px`;
+  return;
+ }
+ caption.textContent='元画像（パン輪郭の解析範囲を読み込み中）';
+ const sources=[];
+ if(s.binary_area_image_path)sources.push({path:s.binary_area_image_path,kind:'binary',label:'黄色：面積計算に使用したパン領域'});
+ if(s.measurement_mask_image_path)sources.push({path:s.measurement_mask_image_path,kind:'mask',label:'黄色：面積計算に使用したパン領域'});
+ if(s.bread_mask_path)sources.push({path:s.bread_mask_path,kind:'mask',label:'黄色：保存された入力輪郭（実際の計測範囲と異なる場合があります）'});
+ for(const source of sources){
+  try{
+   const mask=await loadUrlImage(source.path+'?t='+Date.now());
+   if(generation!==savedViewGeneration)return;
+   if(Math.abs(mask.naturalWidth/mask.naturalHeight-width/height)>2/Math.min(mask.naturalHeight,height))continue;
+   const ctx=canvas.getContext('2d');canvas.width=mask.naturalWidth;canvas.height=mask.naturalHeight;
+   ctx.drawImage(mask,0,0);
+   const image=ctx.getImageData(0,0,canvas.width,canvas.height),data=image.data;
+   let count=0;
+   for(let i=0;i<data.length;i+=4){
+    const selected=savedMaskSelected(data[i],data[i+3],source.kind);
+    data[i]=255;data[i+1]=230;data[i+2]=0;data[i+3]=selected?80:0;if(selected)count++;
+   }
+   if(!count)continue;
+   ctx.putImageData(image,0,0);
+   canvas.classList.remove('hidden');caption.textContent='元画像（'+source.label+'）';return;
+  }catch(e){if(generation!==savedViewGeneration)return;}
+ }
+ if(generation===savedViewGeneration)caption.textContent='元画像（解析範囲の画像が保存されていないか、読み込めません）';
+}
+async function prepareSavedResultBase(originalUrl,resultUrl,parametersData,roiData,generation){
+ const [original,result]=await Promise.all([loadUrlImage(originalUrl),loadUrlImage(resultUrl)]);
+ if(generation!==savedViewGeneration)return null;
+ const canvas=$('savedResultBaseCanvas'),context=canvas.getContext('2d');
  canvas.width=result.naturalWidth;canvas.height=result.naturalHeight;
  let source={x:0,y:0,w:original.naturalWidth,h:original.naturalHeight};
  if((parametersData.analysis_scope||'rectangle')==='rectangle'&&roiData){source={x:Number(roiData.x)||0,y:Number(roiData.y)||0,w:Number(roiData.w)||original.naturalWidth,h:Number(roiData.h)||original.naturalHeight};}
  source.x=Math.max(0,Math.min(original.naturalWidth-1,source.x));source.y=Math.max(0,Math.min(original.naturalHeight-1,source.y));source.w=Math.max(1,Math.min(original.naturalWidth-source.x,source.w));source.h=Math.max(1,Math.min(original.naturalHeight-source.y,source.h));
  context.clearRect(0,0,canvas.width,canvas.height);context.drawImage(original,source.x,source.y,source.w,source.h,0,0,canvas.width,canvas.height);
  const stage=$('savedResultOverlayStage');stage.dataset.imageWidth=String(canvas.width);stage.dataset.imageHeight=String(canvas.height);stage.style.setProperty('--result-aspect',`${canvas.width}/${canvas.height}`);
+ return original;
 }
 window.viewSavedAnalysis=async id=>{
+ const generation=++savedViewGeneration;
+ $('savedAnalysisPanel').classList.add('hidden');savedAnalysis=null;clearSavedOriginalRange();
  try{
   const s=(await api('sample',{query:`&sample_id=${id}`})).item;
+  if(generation!==savedViewGeneration)return;
   savedAnalysis=s;
   const panel=$('savedAnalysisPanel');
   $('savedAnalysisMeta').innerHTML=`<p><strong>${esc(s.sample_code)}</strong>　
    試験：${esc(s.experiment_name)}　試験区：${esc(s.treatment_name)}　
-   反復：${esc(s.replicate_no||'')}　処理日時：${esc(s.processed_at)}</p>
+   反復：${esc(s.replicate_no||'')}</p>
    ${s.latest_correction_at?`<p class="notice">手動補正版あり：${esc(s.latest_correction_at)}</p>`:''}`;
   const keys=['bread_area_mm2','hole_count','hole_area_mm2','porosity_percent',
    'binary_white_area_mm2','binary_black_area_mm2','binary_white_percent','binary_black_percent',
@@ -841,16 +904,20 @@ window.viewSavedAnalysis=async id=>{
   $('savedOriginalImage').src=originalUrl;$('savedOriginalToggle').checked=false;$('savedOriginalFigure').classList.add('hidden');$('savedResultImage').src=resultUrl;$('savedResultImage').style.opacity='.6';$('savedResultOpacity').value='60';$('savedResultOpacityValue').textContent='60%';$('savedResultZoom').value='100';$('savedResultZoomValue').textContent='100%';$('savedResultOverlayStage').style.width='100%';$('savedResultOverlayStage').classList.remove('zoom-reduced');
   let p={};try{p=JSON.parse(s.parameter_json||'{}')}catch(e){}
   let roiData=null;try{roiData=s.roi_json?JSON.parse(s.roi_json):null}catch(e){}
-  await prepareSavedResultBase(originalUrl,resultUrl,p,roiData);
+  const original=await prepareSavedResultBase(originalUrl,resultUrl,p,roiData,generation);
+  if(!original||generation!==savedViewGeneration)return;
+  await showSavedOriginalRange(s,p,roiData,original.naturalWidth,original.naturalHeight,generation);
+  if(generation!==savedViewGeneration)return;
   const binaryFigure=$('savedBinaryFigure');binaryFigure.classList.add('hidden');
   if(s.binary_area_image_path){
    const binaryUrl=`${s.binary_area_image_path}?t=${Date.now()}`;
    try{
     const binaryImage=await loadUrlImage(binaryUrl),stage=$('savedBinaryStage');
+    if(generation!==savedViewGeneration)return;
     $('savedBinaryImage').src=binaryUrl;$('savedBinaryImage').style.opacity='.6';$('savedBinaryOpacity').value='60';$('savedBinaryOpacityValue').textContent='60%';stage.dataset.imageWidth=String(binaryImage.naturalWidth);stage.dataset.imageHeight=String(binaryImage.naturalHeight);stage.style.setProperty('--result-aspect',`${binaryImage.naturalWidth}/${binaryImage.naturalHeight}`);stage.style.width='100%';stage.classList.remove('zoom-reduced');
     const binaryBase=$('savedBinaryBaseCanvas'),binaryBaseContext=binaryBase.getContext('2d'),resultBase=$('savedResultBaseCanvas');binaryBase.width=binaryImage.naturalWidth;binaryBase.height=binaryImage.naturalHeight;binaryBaseContext.clearRect(0,0,binaryBase.width,binaryBase.height);binaryBaseContext.drawImage(resultBase,0,0,binaryBase.width,binaryBase.height);
     $('savedBinaryZoom').value='100';$('savedBinaryZoomValue').textContent='100%';binaryFigure.classList.remove('hidden');
-   }catch(_){binaryFigure.classList.add('hidden');}
+   }catch(_){if(generation!==savedViewGeneration)return;binaryFigure.classList.add('hidden');}
   }
   const rows=[...Object.entries(p),['ROI',roiData?JSON.stringify(roiData):'未指定'],
    ['パン輪郭マスク',s.bread_mask_path||'なし'],
@@ -858,9 +925,9 @@ window.viewSavedAnalysis=async id=>{
   $('savedParameterTable').innerHTML='<table><tr><th>項目</th><th>保存値</th></tr>'+
    rows.map(([k,v])=>`<tr><td>${esc(k)}</td><td>${esc(typeof v==='object'?JSON.stringify(v):v)}</td></tr>`).join('')+'</table>';
   panel.classList.remove('hidden');requestAnimationFrame(()=>panel.querySelectorAll('.result-comparison:not(.hidden)').forEach(figure=>applyResultZoom(figure,100)));panel.scrollIntoView({behavior:'smooth',block:'start'});
- }catch(e){alert(e.message)}
+ }catch(e){if(generation===savedViewGeneration)alert(e.message)}
 };
-$('closeSavedAnalysis').onclick=()=>{$('savedAnalysisPanel').classList.add('hidden');savedAnalysis=null;};
+$('closeSavedAnalysis').onclick=()=>{++savedViewGeneration;$('savedAnalysisPanel').classList.add('hidden');savedAnalysis=null;clearSavedOriginalRange();};
 $('restoreForReanalysis').onclick=async()=>{
  if(!savedAnalysis||analysisRunning||manualSaving||deletionRunning)return;
  if(manualEdit.actions.length&&!confirm('未保存の手動補正を破棄しますか？'))return;

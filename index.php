@@ -11,7 +11,7 @@ if (file_exists($configFile)) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title><?= htmlspecialchars($appName, ENT_QUOTES, 'UTF-8') ?></title>
-<link rel="stylesheet" href="assets/style.css?v=10.6.0-delete1">
+<link rel="stylesheet" href="assets/style.css?v=10.6.0-roi-display1">
 </head>
 <body>
 <div id="loginView" class="center-card hidden">
@@ -299,8 +299,8 @@ if (file_exists($configFile)) {
     <div class="image-visibility-toolbar"><label class="inline-check"><input id="savedOriginalToggle" class="original-visibility-toggle" type="checkbox"> 元画像を表示</label></div>
     <div class="result-grid">
       <figure id="savedOriginalFigure" class="original-result-figure hidden">
-        <img id="savedOriginalImage" alt="保存済み元画像">
-        <figcaption>元画像</figcaption>
+        <div class="saved-original-stage"><img id="savedOriginalImage" alt="保存済み元画像"><div id="savedRoiRect" class="saved-roi-rect hidden" aria-hidden="true"></div><canvas id="savedRoiMask" class="saved-roi-mask hidden" aria-hidden="true"></canvas></div>
+        <figcaption id="savedOriginalCaption">元画像</figcaption>
       </figure>
       <figure>
         <div class="result-comparison">
@@ -383,6 +383,6 @@ if (file_exists($configFile)) {
 
 <canvas id="workCanvas" class="hidden"></canvas>
 <script defer src="assets/vendor/xlsx.full.min.js"></script>
-<script defer src="assets/app.js?v=10.6.0-delete1"></script>
+<script defer src="assets/app.js?v=10.6.0-roi-display1"></script>
 </body>
 </html>

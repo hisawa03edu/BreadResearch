@@ -735,10 +735,13 @@ try {
         $item=$st->fetch();
         if(!$item) respond(['ok'=>false,'error'=>'サンプルがありません。'],404);
         $item['binary_area_image_path'] = null;
+        $item['measurement_mask_image_path'] = null;
         $resultFile = basename((string)($item['result_image_path'] ?? ''));
         if (preg_match('/^(.+)_overlay\.png$/', $resultFile, $match)) {
             $candidate = 'uploads/intermediate/' . $match[1] . '_binary_area.png';
             if (is_file(__DIR__ . '/' . $candidate)) $item['binary_area_image_path'] = $candidate;
+            $maskCandidate = 'uploads/intermediate/' . $match[1] . '_measurement_mask.png';
+            if (is_file(__DIR__ . '/' . $maskCandidate)) $item['measurement_mask_image_path'] = $maskCandidate;
         }
         respond(['ok'=>true,'item'=>$item]);
     }
