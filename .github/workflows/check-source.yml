@@ -1,0 +1,25 @@
+name: Check BreadResearch source
+
+on:
+  pull_request:
+    paths:
+      - 'assets/app.js'
+      - 'index.php'
+      - '.github/tests/roi-sync.test.cjs'
+      - '.github/workflows/check-source.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check JavaScript syntax and ROI regression tests
+        run: |
+          node --check assets/app.js
+          node --test .github/tests/roi-sync.test.cjs
+      - name: Check PHP syntax
+        run: php -l index.php
