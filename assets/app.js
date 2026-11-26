@@ -1,5 +1,6 @@
 const $=id=>document.getElementById(id);
-let experiments=[],currentSamples=[],roi=null,roiImage=null,serverPresets={},rerunMeta=null;
+let experiments=[],currentSamples=[],roi=null,roiImage=null,serverPresets=new Map(),rerunMeta=null;
+let appliedPresetKey=null,presetBusy=false,presetReady=false,presetSnapshot=null;
 let manualEdit={sampleId:null,baseImage:null,actions:[]};
 let savedAnalysis=null,savedViewGeneration=0;
 let rerunFile=null;
@@ -24,7 +25,7 @@ let breadMaskStateCanvas=null,breadMaskOriginalDataUrl=null,breadMaskPrepared=nu
 let engineReady=false;
 let activeAnalysisController=null;
 let engineDiagnostic=null;
-const builtinPresets={'食パン（研究標準）':{dpi:300,max_dimension:1400,use_clahe:true,clahe_clip:2,clahe_tiles:8,blur_size:5,threshold_mode:'adaptive',hole_threshold:145,adaptive_block:41,adaptive_c:5,open_size:1,close_size:3,use_distance:true,distance_ratio:.35,use_watershed:true,background_dilate:3,use_large_hole_rescue:true,large_hole_window:61,large_hole_contrast:12,large_hole_min_area_mm2:2,large_hole_max_fraction:.05,border_margin:3,min_area_mm2:.15,max_area_mm2:0,min_circularity:0,max_aspect_ratio:20,small_limit_mm:2,medium_limit_mm:4,fill_contours:true,show_numbers:true,save_intermediates:true}};
+const builtinPresets={'食パン（研究標準）':{analysis_scope:'rectangle',dpi:300,max_dimension:1400,use_clahe:true,clahe_clip:2,clahe_tiles:8,blur_size:5,threshold_mode:'adaptive',hole_threshold:145,adaptive_block:41,adaptive_c:5,open_size:1,close_size:3,use_distance:true,distance_ratio:.35,use_watershed:true,background_dilate:3,use_large_hole_rescue:true,large_hole_window:61,large_hole_contrast:12,large_hole_min_area_mm2:2,large_hole_max_fraction:.05,border_margin:3,min_area_mm2:.15,max_area_mm2:0,min_circularity:0,max_aspect_ratio:20,small_limit_mm:2,medium_limit_mm:4,fill_contours:true,show_numbers:true,save_intermediates:true}};
 async function api(action,opt={}){
  const r=await fetch(`api.php?action=${action}${opt.query||''}`,{method:opt.method||'GET',headers:{'Content-Type':'application/json'},body:opt.body?JSON.stringify(opt.body):undefined});
  const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'通信エラー');return d;
@@ -335,9 +336,118 @@ async function deleteTreatment(t){
 }
 $('createExperiment').onclick=async()=>{try{await api('create_experiment',{method:'POST',body:{name:$('expName').value,objective:$('expObjective').value,researcher:$('expResearcher').value,institution:$('expInstitution').value,start_date:$('expStartDate').value,notes:$('expNotes').value}});await refreshExperiments();alert('登録しました')}catch(e){alert(e.message)}};
 $('createTreatment').onclick=async()=>{try{await api('create_treatment',{method:'POST',body:{experiment_id:$('treatExperiment').value,name:$('treatName').value,display_order:num('treatOrder'),description:$('treatDescription').value}});await refreshTreatments();alert('登録しました')}catch(e){alert(e.message)}};
-async function loadPresets(){const a=(await api('presets')).items;a.forEach(x=>serverPresets[x.name]=JSON.parse(x.parameter_json));const names=[...Object.keys(builtinPresets),...Object.keys(serverPresets)];$('presetSelect').innerHTML=names.map(n=>`<option>${esc(n)}</option>`).join('');}
-$('applyPreset').onclick=()=>{const n=$('presetSelect').value;setParameters(serverPresets[n]||builtinPresets[n])};
-$('savePreset').onclick=async()=>{const name=$('presetName').value.trim();if(!name)return alert('名前を入力してください');await api('save_preset',{method:'POST',body:{name,parameters:parameters()}});await loadPresets();alert('保存しました')};
+function presetEntries(){
+ return [...Object.entries(builtinPresets).map(([name,parameters])=>({key:'builtin:'+name,name,parameters,builtin:true})),...serverPresets.values()];
+}
+function selectedPreset(){
+ return presetEntries().find(entry=>entry.key===$('presetSelect').value)||null;
+}
+function updatePresetControls(){
+ const entry=selectedPreset(),applied=presetEntries().find(item=>item.key===appliedPresetKey);
+ const canUse=presetReady&&!presetBusy;
+ $('presetSelect').disabled=!canUse;
+ $('applyPreset').disabled=!canUse||!entry;
+ $('updatePreset').disabled=!canUse||!entry||entry.builtin||entry.key!==appliedPresetKey;
+ $('deletePreset').disabled=!canUse||!entry||entry.builtin;
+ $('savePreset').disabled=!canUse;
+ $('presetName').disabled=!canUse;
+ if(applied){
+  const changed=presetSnapshot!==JSON.stringify(parameters());
+  $('presetStatus').textContent='適用中：'+applied.name+(applied.builtin?'（標準）':'')+(changed?' ／ パラメータ変更あり（未保存）':'');
+ }else{
+  $('presetStatus').textContent='プリセットを適用するか、現在の条件を新規保存できます。';
+ }
+}
+async function loadPresets(preferredKey=null){
+ const previous=preferredKey||$('presetSelect').value;
+ const items=(await api('presets')).items;
+ const next=new Map();
+ for(const item of items){
+  let values;
+  try{values=typeof item.parameter_json==='string'?JSON.parse(item.parameter_json):item.parameter_json;}catch(_){continue;}
+  if(!values||typeof values!=='object'||Array.isArray(values))continue;
+  const key='saved:'+item.id;
+  next.set(key,{key,id:item.id,name:item.name,parameters:values,builtin:false});
+ }
+ serverPresets=next;
+ const select=$('presetSelect');
+ select.replaceChildren();
+ for(const entry of presetEntries()){
+  const option=document.createElement('option');
+  option.value=entry.key;option.textContent=entry.name+(entry.builtin?'（標準）':'');
+  select.append(option);
+ }
+ if(presetEntries().some(entry=>entry.key===previous))select.value=previous;
+ if(!presetEntries().some(entry=>entry.key===appliedPresetKey)){appliedPresetKey=null;presetSnapshot=null;}
+ presetReady=true;updatePresetControls();
+}
+function markPresetApplied(key,values){
+ appliedPresetKey=key;presetSnapshot=JSON.stringify(values);
+ updatePresetControls();
+}
+$('presetSelect').onchange=updatePresetControls;
+$('applyPreset').onclick=()=>{
+ if(presetBusy||!presetReady)return;
+ const entry=selectedPreset();if(!entry)return;
+ if(appliedPresetKey&&presetSnapshot!==JSON.stringify(parameters())&&!confirm('現在の未保存のパラメータ変更を破棄して適用しますか？'))return;
+ // The standard values supply any fields missing in older saved presets.
+ setParameters({...Object.values(builtinPresets)[0],...entry.parameters});
+ markPresetApplied(entry.key,parameters());
+};
+async function runPresetMutation(action,body,onSuccess){
+ if(presetBusy||!presetReady)return;
+ presetBusy=true;updatePresetControls();
+ let saved=false;
+ try{
+  const result=await api(action,{method:'POST',body});
+  saved=true;
+  await onSuccess(result);
+ }catch(e){
+  if(saved){presetReady=false;$('presetStatus').textContent='保存・削除は実行されました。一覧を再取得するには画面を再読み込みしてください。';alert('操作は完了しましたが一覧を更新できませんでした。画面を再読み込みしてください。');}
+  else alert(e.message);
+ }finally{
+  presetBusy=false;updatePresetControls();
+  if(!presetReady)$('presetStatus').textContent='一覧を更新できませんでした。画面を再読み込みしてください。';
+ }
+}
+$('savePreset').onclick=async()=>{
+ const name=$('presetName').value.trim();
+ if(!name)return alert('新しいプリセット名を入力してください。');
+ const values=parameters();
+ await runPresetMutation('save_preset',{name,parameters:values},async result=>{
+  const key='saved:'+result.id;
+  await loadPresets(key);
+  $('presetName').value='';
+  markPresetApplied(key,values);
+  alert('新しいプリセットを保存しました。');
+ });
+};
+$('updatePreset').onclick=async()=>{
+ const entry=selectedPreset();
+ if(!entry||entry.builtin||entry.key!==appliedPresetKey)return alert('上書きする自作プリセットを先に適用してください。');
+ const values=parameters();
+ if(!confirm('プリセット「'+entry.name+'」を現在の解析パラメータで上書きしますか？'))return;
+ await runPresetMutation('update_preset',{preset_id:entry.id,parameters:values},async()=>{
+  await loadPresets(entry.key);
+  markPresetApplied(entry.key,values);
+  alert('プリセットを上書き保存しました。');
+ });
+};
+$('deletePreset').onclick=async()=>{
+ const entry=selectedPreset();
+ if(!entry||entry.builtin)return;
+ if(!confirm('プリセット「'+entry.name+'」を削除しますか？\n保存済み解析には影響しません。'))return;
+ await runPresetMutation('delete_preset',{preset_id:entry.id},async()=>{
+  if(appliedPresetKey===entry.key){appliedPresetKey=null;presetSnapshot=null;}
+  await loadPresets();
+  alert('プリセットを削除しました。現在のパラメータはそのままです。');
+ });
+};
+document.querySelectorAll('.params input,.params select,#analysisScope').forEach(input=>{
+ input.addEventListener('input',updatePresetControls);
+ input.addEventListener('change',updatePresetControls);
+});
+
 function loadImage(file){return new Promise((res,rej)=>{
  const im=new Image(),url=URL.createObjectURL(file);
  im.onload=()=>{URL.revokeObjectURL(url);res(im);};
@@ -1058,7 +1168,8 @@ $('restoreForReanalysis').onclick=async()=>{
  try{
   let p={};try{p=JSON.parse(sample.parameter_json||'{}')}catch(e){}
   if(!p.analysis_scope)p.analysis_scope='rectangle';
-  setParameters(p);
+  appliedPresetKey=null;presetSnapshot=null;
+  setParameters(p);updatePresetControls();
   let restoredRoi=null;try{restoredRoi=sample.roi_json?JSON.parse(sample.roi_json):null}catch(e){}
   $('imageFiles').value='';rerunFile=null;rerunMeta=null;resetBreadMask();resetRoiPreview();clearManualEditor();
   $('analysisExperiment').value=String(sample.experiment_id);await refreshTreatments();

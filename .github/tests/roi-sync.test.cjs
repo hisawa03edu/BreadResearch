@@ -148,3 +148,61 @@ test('row edit and bulk edit share an editor without replacing checkbox selectio
  assert.match(source,/min_area_mm2:num\('minArea'\)/);
  assert.match(source,/空洞の最小面積\(mm²\) \/ min_area_mm2/);
 });
+
+
+test('preset apply, overwrite, save-as and delete use stable IDs and preserve other entries',async()=>{
+ const elements={},calls=[],alerts=[];
+ let current={dpi:300,min_area_mm2:.15,analysis_scope:'rectangle'};
+ let records=[{id:7,name:'生米パン',parameter_json:'{"dpi":600,"min_area_mm2":1}'},{id:8,name:'食パン（研究標準）',parameter_json:'{"dpi":450}'}];
+ const $=id=>elements[id]||=( {value:'',textContent:'',disabled:false,children:[],replaceChildren(){this.children=[];this.value='';},append(option){this.children.push(option);if(!this.value)this.value=option.value;}} );
+ const sandbox={$,
+  builtinPresets:{'食パン（研究標準）':{dpi:300,min_area_mm2:.15,analysis_scope:'rectangle'}},
+  serverPresets:new Map(),appliedPresetKey:null,presetBusy:false,presetReady:false,presetSnapshot:null,
+  document:{createElement:()=>({}),querySelectorAll:()=>[]},
+  parameters:()=>({...current}),setParameters:p=>{current={...p};},
+  confirm:()=>true,alert:v=>alerts.push(v),
+  api:async(action,options)=>{
+   calls.push({action,body:options?.body});
+   const b=options?.body;
+   if(action==='presets')return {items:records};
+   if(action==='update_preset'){records=records.map(x=>x.id===b.preset_id?{...x,parameter_json:JSON.stringify(b.parameters)}:x);return {id:b.preset_id};}
+   if(action==='save_preset'){records.push({id:9,name:b.name,parameter_json:JSON.stringify(b.parameters)});return {id:9};}
+   if(action==='delete_preset'){records=records.filter(x=>x.id!==b.preset_id);return {deleted_id:b.preset_id};}
+   throw Error(action);
+  }
+ };
+ vm.createContext(sandbox);
+ vm.runInContext(between('function presetEntries()','function loadImage(file)'),sandbox);
+ await sandbox.loadPresets();
+ assert.equal($('presetSelect').children.length,3);
+ assert.equal($('deletePreset').disabled,true);
+ assert.equal($('updatePreset').disabled,true);
+ $('presetSelect').value='saved:7';$('presetSelect').onchange();
+ assert.equal($('updatePreset').disabled,true);
+ $('applyPreset').onclick();
+ assert.equal(current.dpi,600);
+ assert.equal(current.analysis_scope,'rectangle');
+ assert.equal($('updatePreset').disabled,false);
+ current.min_area_mm2=.5;sandbox.updatePresetControls();
+ assert.match($('presetStatus').textContent,/未保存/);
+ $('presetSelect').value='saved:8';$('presetSelect').onchange();
+ assert.equal($('updatePreset').disabled,true);
+ $('presetSelect').value='saved:7';$('presetSelect').onchange();
+ await $('updatePreset').onclick();
+ assert.equal(calls.find(x=>x.action==='update_preset').body.preset_id,7);
+ assert.equal(JSON.parse(records[0].parameter_json).min_area_mm2,.5);
+ assert.doesNotMatch($('presetStatus').textContent,/未保存/);
+ $('presetName').value='新規';
+ await $('savePreset').onclick();
+ assert.equal($('presetSelect').value,'saved:9');
+ assert.equal(records.length,3);
+ await $('deletePreset').onclick();
+ assert.equal(records.length,2);
+ assert.equal(sandbox.appliedPresetKey,null);
+ assert.equal(current.min_area_mm2,.5);
+ assert.equal($('presetSelect').children.length,3);
+ assert.ok(!sandbox.serverPresets.has('saved:9'));
+ $('presetSelect').value='builtin:食パン（研究標準）';$('presetSelect').onchange();
+ assert.equal($('deletePreset').disabled,true);
+ assert.equal($('updatePreset').disabled,true);
+});

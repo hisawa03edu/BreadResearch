@@ -712,14 +712,52 @@ try {
         respond(['ok'=>true,'items'=>$items]);
     }
 
-    if ($action === 'save_preset') {
-        $name = trim((string)($input['name'] ?? ''));
-        if ($name === '') respond(['ok'=>false,'error'=>'プリセット名は必須です。'],422);
-        $json = json_encode($input['parameters'] ?? [], JSON_UNESCAPED_UNICODE);
-        $st = $pdo->prepare("INSERT INTO analysis_presets(name,description,parameter_json)
-            VALUES(?,?,?) ON DUPLICATE KEY UPDATE description=VALUES(description),parameter_json=VALUES(parameter_json)");
-        $st->execute([$name,$input['description'] ?? '',$json]);
-        respond(['ok'=>true]);
+    if (in_array($action,['save_preset','update_preset','delete_preset'],true)) {
+        requireDeletePost();
+        if ($action === 'delete_preset') {
+            $id = positiveDeleteId($input['preset_id'] ?? null);
+            if (!$id) respond(['ok'=>false,'error'=>'プリセットを選択してください。'],422);
+            $st = $pdo->prepare('DELETE FROM analysis_presets WHERE id=?');
+            $st->execute([$id]);
+            if (!$st->rowCount()) respond(['ok'=>false,'error'=>'プリセットが見つかりません。一覧を更新してください。'],404);
+            respond(['ok'=>true,'deleted_id'=>$id]);
+        }
+        $parameters = $input['parameters'] ?? null;
+        if (!is_array($parameters) || !$parameters || array_is_list($parameters)) {
+            respond(['ok'=>false,'error'=>'解析パラメータが正しくありません。'],422);
+        }
+        $json = json_encode($parameters, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        if ($action === 'update_preset') {
+            $id = positiveDeleteId($input['preset_id'] ?? null);
+            if (!$id) respond(['ok'=>false,'error'=>'プリセットを選択してください。'],422);
+            $pdo->beginTransaction();
+            $st = $pdo->prepare('SELECT id,name FROM analysis_presets WHERE id=? FOR UPDATE');
+            $st->execute([$id]);
+            $row = $st->fetch();
+            if (!$row) {
+                $pdo->rollBack();
+                respond(['ok'=>false,'error'=>'プリセットが見つかりません。一覧を更新してください。'],404);
+            }
+            $st = $pdo->prepare('UPDATE analysis_presets SET parameter_json=? WHERE id=?');
+            $st->execute([$json,$id]);
+            $pdo->commit();
+            respond(['ok'=>true,'id'=>$id,'name'=>$row['name']]);
+        }
+        $rawName = $input['name'] ?? '';
+        $name = is_string($rawName) ? trim($rawName) : '';
+        $length = function_exists('mb_strlen') ? mb_strlen($name,'UTF-8') : preg_match_all('/./us',$name);
+        if ($name === '' || $length > 100) respond(['ok'=>false,'error'=>'プリセット名は1～100文字で入力してください。'],422);
+        if ($name === '食パン（研究標準）') respond(['ok'=>false,'error'=>'標準プリセットとは別の名前で保存してください。'],409);
+        try {
+            $st = $pdo->prepare('INSERT INTO analysis_presets(name,description,parameter_json) VALUES(?,?,?)');
+            $st->execute([$name,(string)($input['description'] ?? ''),$json]);
+        } catch (PDOException $e) {
+            if ((int)($e->errorInfo[1] ?? 0) === 1062) {
+                respond(['ok'=>false,'error'=>'同名のプリセットがあります。別名で保存するか、適用後に上書き保存してください。'],409);
+            }
+            throw $e;
+        }
+        respond(['ok'=>true,'id'=>(int)$pdo->lastInsertId(),'name'=>$name]);
     }
 
     if ($action === 'sample') {

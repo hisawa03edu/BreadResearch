@@ -11,7 +11,7 @@ if (file_exists($configFile)) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title><?= htmlspecialchars($appName, ENT_QUOTES, 'UTF-8') ?></title>
-<link rel="stylesheet" href="assets/style.css?v=10.6.0-saved-print1">
+<link rel="stylesheet" href="assets/style.css?v=10.6.0-presets1">
 </head>
 <body>
 <div id="loginView" class="center-card hidden">
@@ -131,11 +131,19 @@ if (file_exists($configFile)) {
   <details class="card" open>
     <summary><strong>解析パラメータ</strong></summary>
     <p><a class="button-link" href="parameter_manual.php" target="_blank" rel="noopener">各パラメータの説明マニュアルを開く</a></p>
-    <div class="preset-row">
-      <label>解析条件プリセット<select id="presetSelect"></select></label>
-      <button id="applyPreset">適用</button>
-      <input id="presetName" placeholder="新しいプリセット名">
-      <button id="savePreset">現在条件を保存</button>
+    <div class="preset-management">
+      <div class="preset-row preset-existing">
+        <label>解析条件プリセット<select id="presetSelect" disabled></select></label>
+        <button id="applyPreset" type="button" disabled>適用</button>
+        <button id="updatePreset" type="button" class="primary" disabled>上書き保存</button>
+        <button id="deletePreset" type="button" class="danger" disabled>削除</button>
+      </div>
+      <div class="preset-row preset-new">
+        <label>新規プリセット名<input id="presetName" maxlength="100" placeholder="例：生米パン・600dpi" disabled></label>
+        <button id="savePreset" type="button" disabled>別名で新規保存</button>
+      </div>
+      <p id="presetStatus" class="small-note" role="status">プリセットを読み込み中…</p>
+      <p class="small-note">自作プリセットを適用してからパラメータを調整すると、上書き保存できます。標準プリセットは別名で保存してください。</p>
     </div>
     <div class="form-grid params">
 <label>DPI<input id="dpi" type="number" value="300"></label>
@@ -384,6 +392,6 @@ if (file_exists($configFile)) {
 <section id="savedAnalysisPrintReport" class="saved-analysis-print-report" aria-hidden="true"></section>
 <canvas id="workCanvas" class="hidden"></canvas>
 <script defer src="assets/vendor/xlsx.full.min.js"></script>
-<script defer src="assets/app.js?v=10.6.0-row-edit1"></script>
+<script defer src="assets/app.js?v=10.6.0-presets1"></script>
 </body>
 </html>
