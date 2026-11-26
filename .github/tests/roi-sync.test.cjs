@@ -134,3 +134,17 @@ test('saved analysis print is isolated from statistics and includes all stored p
  assert.match(css,/\.saved-print-conditions thead\{display:table-header-group\}/);
  assert.match(source,/window\.addEventListener\('afterprint',clearSavedPrintReport\)/);
 });
+
+
+test('row edit and bulk edit share an editor without replacing checkbox selection',()=>{
+ const html=fs.readFileSync('index.php','utf8');
+ const editor=between('async function openSampleEditor','$(\'analyzeSelectedSamples\').onclick');
+ assert.match(source,/onclick="editSample\(\$\{s\.id\}\)">修正/);
+ assert.match(editor,/window\.editSample=id=>openSampleEditor\(\[id\]\)/);
+ assert.match(editor,/openSampleEditor\(\[\.\.\.selectedSampleIds\]\)/);
+ assert.doesNotMatch(editor,/selectedSampleIds\.(clear|add|delete)\(/);
+ assert.match(editor,/api\('update_samples'/);
+ assert.match(html,/空洞の最小面積\(mm²\)<input id="minArea" type="number" value="0.15"/);
+ assert.match(source,/min_area_mm2:num\('minArea'\)/);
+ assert.match(source,/空洞の最小面積\(mm²\) \/ min_area_mm2/);
+});
