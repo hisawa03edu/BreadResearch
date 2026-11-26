@@ -19,6 +19,7 @@ let selectedSampleIds=new Set();
 let selectedExperimentId=null;
 let currentStats=null;
 let deletionRunning=false,managementLoadGeneration=0,samplesLoadGeneration=0,statsGeneration=0;
+let sampleEditGeneration=0,sampleEditSaving=false,sampleEditExperiment=null;
 let breadMaskStateCanvas=null,breadMaskOriginalDataUrl=null,breadMaskPrepared=null,breadMaskEditMode='add';
 let engineReady=false;
 let activeAnalysisController=null;
@@ -282,6 +283,7 @@ $('analysisExperiment').onchange=refreshTreatments;
 $('treatExperiment').onchange=()=>refreshManagedTreatments().catch(e=>alert(e.message));
 function canDelete(){
  if(deletionRunning)return false;
+ if(sampleEditSaving){alert('サンプルの修正保存が完了してから削除してください。');return false;}
  if(analysisRunning||manualSaving){alert('画像解析または手動補正の保存が完了してから削除してください。');return false;}
  return true;
 }
@@ -294,7 +296,7 @@ function invalidateStats(){
 async function refreshAfterDeletion(){
  invalidateStats();
  $('holesTable').innerHTML='';
- $('selectedSampleEditPanel').classList.add('hidden');
+ closeSampleEditor();
  ++savedViewGeneration;if(savedAnalysis){$('savedAnalysisPanel').classList.add('hidden');savedAnalysis=null;clearSavedOriginalRange();}
  await refreshExperiments();
  await Promise.all([loadSamples(),loadDashboard()]);
@@ -668,7 +670,7 @@ function renderSamplesTable(){
    const arrow=dataTableState.sortKey===c.key?(dataTableState.sortDir==='asc'?' ▲':' ▼'):'';
    return `<th class="sortable" data-sort="${c.key}">${esc(c.label)}${arrow}</th>`;
  }).join('')}<th>操作</th></tr></thead><tbody>`+
- rows.map(s=>{const thumbs=showThumbnails?sampleThumbnailCell(s.original_image_path,'元画像',s.id)+sampleThumbnailCell(s.latest_corrected_result_path||s.result_image_path,'解析結果',s.id):'';return `<tr class="${selectedSampleIds.has(Number(s.id))?'selected-row':''}"><td class="select-cell"><input class="sample-select" type="checkbox" data-sample-id="${s.id}" ${selectedSampleIds.has(Number(s.id))?'checked':''}></td>${thumbs}${cols.map(c=>`<td>${formatCell(s[c.key],c.type)}</td>`).join('')}<td class="action-cell"><button onclick="viewSavedAnalysis(${s.id})">画像・結果</button> <button onclick="showHoles(${s.id})">空洞詳細</button> <button type="button" class="danger" onclick="deleteSample(${s.id})">削除</button></td></tr>`;}).join('')+'</tbody>';
+ rows.map(s=>{const thumbs=showThumbnails?sampleThumbnailCell(s.original_image_path,'元画像',s.id)+sampleThumbnailCell(s.latest_corrected_result_path||s.result_image_path,'解析結果',s.id):'';return `<tr class="${selectedSampleIds.has(Number(s.id))?'selected-row':''}"><td class="select-cell"><input class="sample-select" type="checkbox" data-sample-id="${s.id}" ${selectedSampleIds.has(Number(s.id))?'checked':''}></td>${thumbs}${cols.map(c=>`<td>${formatCell(s[c.key],c.type)}</td>`).join('')}<td class="action-cell"><button type="button" class="primary" onclick="editSample(${s.id})">修正</button> <button onclick="viewSavedAnalysis(${s.id})">画像・結果</button> <button onclick="showHoles(${s.id})">空洞詳細</button> <button type="button" class="danger" onclick="deleteSample(${s.id})">削除</button></td></tr>`;}).join('')+'</tbody>';
  $('samplesTable').querySelectorAll('th.sortable').forEach(th=>th.onclick=()=>{
    const key=th.dataset.sort;if(dataTableState.sortKey===key)dataTableState.sortDir=dataTableState.sortDir==='asc'?'desc':'asc';
    else{dataTableState.sortKey=key;dataTableState.sortDir='asc';}
@@ -711,7 +713,7 @@ async function loadSamples(){
  selectedSampleIds=new Set([...selectedSampleIds].filter(id=>validIds.has(id)));
  dataTableState.page=1;renderSamplesTable();
 }
-$('dataExperiment').onchange=loadSamples;
+$('dataExperiment').onchange=()=>{closeSampleEditor();loadSamples().catch(e=>alert(e.message));};
 $('dataSearch').oninput=e=>{dataTableState.search=e.target.value;dataTableState.page=1;renderSamplesTable();};
 $('dataPageSize').onchange=e=>{dataTableState.pageSize=e.target.value==='all'?'all':Number(e.target.value);dataTableState.page=1;renderSamplesTable();};
 $('dataThumbnailToggle').onchange=e=>{dataTableState.showThumbnails=!!e.target.checked;saveDataTableState();renderSamplesTable();};
@@ -736,33 +738,59 @@ $('selectFilteredSamples').onclick=()=>{
  renderSamplesTable();
 };
 $('clearSelectedSamples').onclick=()=>{selectedSampleIds.clear();renderSamplesTable();};
-$('editSelectedSamples').onclick=async()=>{
- if(!selectedSampleIds.size)return alert('修正するデータを選択してください。');
- if(selectedSampleIds.size>500)return alert('一度に修正できるデータは500件までです。');
- const treatments=(await api('treatments',{query:`&experiment_id=${selectedExperimentId}`})).items;
- if(!treatments.length)return alert('選択できる試験区がありません。');
- const rows=currentSamples.filter(sample=>selectedSampleIds.has(Number(sample.id)));
- const options=sample=>treatments.map(t=>`<option value="${t.id}" ${Number(t.id)===Number(sample.treatment_id)?'selected':''}>${esc(t.name)}</option>`).join('');
- $('selectedSampleEditTable').innerHTML='<thead><tr><th>ID</th><th>現在の試験区</th><th>所属試験区</th><th>サンプル名</th><th>反復</th><th>解析日時</th></tr></thead><tbody>'+rows.map(sample=>`<tr data-sample-id="${sample.id}"><td>${sample.id}</td><td>${esc(sample.treatment_name)}</td><td><select class="edit-treatment">${options(sample)}</select></td><td><input class="edit-sample-code" value="${esc(sample.sample_code)}" maxlength="200"></td><td>${esc(sample.replicate_no)}</td><td>${esc(sample.processed_at)}</td></tr>`).join('')+'</tbody>';
- $('selectedSampleEditStatus').textContent=`${rows.length}件を編集中`;
- $('selectedSampleEditPanel').classList.remove('hidden');
- $('selectedSampleEditPanel').scrollIntoView({behavior:'smooth',block:'start'});
-};
-$('closeSelectedSampleEditor').onclick=()=>{$('selectedSampleEditPanel').classList.add('hidden');$('selectedSampleEditStatus').textContent='';};
+function closeSampleEditor(){
+ ++sampleEditGeneration;sampleEditExperiment=null;
+ $('selectedSampleEditPanel').classList.add('hidden');$('selectedSampleEditStatus').textContent='';
+ $('selectedSampleEditTable').innerHTML='';
+}
+async function openSampleEditor(ids){
+ if(sampleEditSaving||deletionRunning)return;
+ const unique=[...new Set(ids.map(Number))],eid=Number($('dataExperiment').value);
+ if(!unique.length)return alert('修正するデータを選択してください。');
+ if(unique.length>500)return alert('一度に修正できるデータは500件までです。');
+ const rows=currentSamples.filter(sample=>unique.includes(Number(sample.id)));
+ if(!eid||selectedExperimentId!==eid||rows.length!==unique.length)return alert('修正対象を選び直してください。');
+ if(!$('selectedSampleEditPanel').classList.contains('hidden')&&!confirm('編集中の内容を破棄して別のデータを開きますか？'))return;
+ closeSampleEditor();const generation=sampleEditGeneration;
+ try{
+  const treatments=(await api('treatments',{query:`&experiment_id=${eid}`})).items;
+  if(generation!==sampleEditGeneration||Number($('dataExperiment').value)!==eid)return;
+  if(!treatments.length)return alert('選択できる試験区がありません。');
+  const options=sample=>treatments.map(t=>`<option value="${t.id}" ${Number(t.id)===Number(sample.treatment_id)?'selected':''}>${esc(t.name)}</option>`).join('');
+  $('selectedSampleEditTable').innerHTML='<thead><tr><th>現在の試験区</th><th>所属試験区</th><th>サンプル名</th><th>反復</th><th>改訂番号</th></tr></thead><tbody>'+rows.map(sample=>`<tr data-sample-id="${sample.id}"><td>${esc(sample.treatment_name)}</td><td><select aria-label="所属試験区" class="edit-treatment">${options(sample)}</select></td><td><input aria-label="サンプル名" class="edit-sample-code" value="${esc(sample.sample_code)}" maxlength="200"></td><td>${esc(sample.replicate_no)}</td><td>${esc(sample.revision_no)}</td></tr>`).join('')+'</tbody>';
+  sampleEditExperiment=eid;
+  $('selectedSampleEditStatus').textContent=rows.length+'件を編集中';
+  $('selectedSampleEditPanel').classList.remove('hidden');
+  $('selectedSampleEditPanel').scrollIntoView({behavior:'smooth',block:'start'});
+  if(rows.length===1)$('selectedSampleEditTable').querySelector('.edit-sample-code')?.focus({preventScroll:true});
+ }catch(e){if(generation===sampleEditGeneration)alert('編集画面を開けませんでした：'+e.message);}
+}
+window.editSample=id=>openSampleEditor([id]);
+$('editSelectedSamples').onclick=()=>openSampleEditor([...selectedSampleIds]);
+$('closeSelectedSampleEditor').onclick=()=>{if(!sampleEditSaving)closeSampleEditor();};
 $('saveSelectedSampleEdits').onclick=async()=>{
+ if(sampleEditSaving||deletionRunning)return;
+ if(sampleEditExperiment!==Number($('dataExperiment').value))return alert('試験が変更されました。修正対象を選び直してください。');
  const rows=[...$('selectedSampleEditTable').querySelectorAll('tbody tr')];
  const items=rows.map(row=>({sample_id:Number(row.dataset.sampleId),treatment_id:Number(row.querySelector('.edit-treatment').value),sample_code:row.querySelector('.edit-sample-code').value.trim()}));
- if(items.some(item=>!item.sample_code))return alert('サンプル名を空欄にはできません。');
- if(!confirm(`${items.length}件の名称・所属試験区を更新しますか？`))return;
- $('saveSelectedSampleEdits').disabled=true;$('selectedSampleEditStatus').textContent='保存中…';
+ if(!items.length)return alert('修正対象がありません。');
+ if(items.some(item=>!item.sample_code||!item.treatment_id))return alert('試験区とサンプル名は必須です。');
+ if(!confirm(items.length+'件の名称・所属試験区を更新しますか？'))return;
+ sampleEditSaving=true;$('saveSelectedSampleEdits').disabled=true;$('closeSelectedSampleEditor').disabled=true;
+ $('dataExperiment').disabled=true;$('selectedSampleEditStatus').textContent='保存中…';
+ let result;
  try{
-   const result=await api('update_samples',{method:'POST',body:{items}});
-   $('selectedSampleEditStatus').textContent=`${result.updated_count}件を更新しました。`;
-   await loadSamples();
-   $('selectedSampleEditPanel').classList.add('hidden');
+  result=await api('update_samples',{method:'POST',body:{items}});
+  closeSampleEditor();
+  ++savedViewGeneration;$('savedAnalysisPanel').classList.add('hidden');savedAnalysis=null;clearSavedOriginalRange();
+  invalidateStats();
+  try{await refreshExperiments();await Promise.all([loadSamples(),loadDashboard()]);}
+  catch(e){alert('保存しましたが画面の更新に失敗しました。再読み込みしてください。');return;}
+  alert(result.updated_count+'件を更新しました。');
  }catch(error){$('selectedSampleEditStatus').textContent='保存できませんでした：'+error.message;alert(error.message);}
- finally{$('saveSelectedSampleEdits').disabled=false;}
+ finally{sampleEditSaving=false;$('saveSelectedSampleEdits').disabled=false;$('closeSelectedSampleEditor').disabled=false;$('dataExperiment').disabled=false;}
 };
+
 $('analyzeSelectedSamples').onclick=async()=>{
  if(!selectedSampleIds.size)return alert('統計対象を選択してください。');
  $('statsExperiment').value=$('dataExperiment').value;
@@ -919,7 +947,7 @@ window.viewSavedAnalysis=async id=>{
     $('savedBinaryZoom').value='100';$('savedBinaryZoomValue').textContent='100%';binaryFigure.classList.remove('hidden');
    }catch(_){if(generation!==savedViewGeneration)return;binaryFigure.classList.add('hidden');}
   }
-  const rows=[...Object.entries(p),['ROI',roiData?JSON.stringify(roiData):'未指定'],
+  const rows=[...Object.entries(p).map(([key,value])=>[key==='min_area_mm2'?'空洞の最小面積(mm²) / min_area_mm2':key,value]),['ROI',roiData?JSON.stringify(roiData):'未指定'],
    ['パン輪郭マスク',s.bread_mask_path||'なし'],
    ['解析バージョン',s.app_version],['改訂番号',s.revision_no]];
   $('savedParameterTable').innerHTML='<table><tr><th>項目</th><th>保存値</th></tr>'+
