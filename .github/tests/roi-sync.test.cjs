@@ -60,3 +60,34 @@ test('saved manual editor opens its actual tab and uses an independent overlay',
  assert.match(html,/id="manualEditOpacity"/);
  assert.match(html,/id="editCanvas"/);
 });
+
+
+test('saved rectangular ROI scales exactly with displayed original',()=>{
+ const sandbox={};vm.createContext(sandbox);
+ vm.runInContext(between('function savedRoiRectangle','function clearSavedOriginalRange'),sandbox);
+ const rect=sandbox.savedRoiRectangle({x:400,y:200,w:800,h:300},2000,1000);
+ assert.deepEqual(JSON.parse(JSON.stringify(rect)),{x:400,y:200,w:800,h:300});
+ assert.deepEqual(JSON.parse(JSON.stringify(sandbox.savedRoiPercent(rect,2000,1000))),{left:20,top:20,width:40,height:30});
+ assert.equal(sandbox.savedRoiRectangle(null,2000,1000),null);
+ assert.equal(sandbox.savedRoiRectangle({x:1900,y:0,w:800,h:300},2000,1000),null);
+ assert.equal(sandbox.savedRoiRectangle({x:0,y:0,w:2000,h:1000},2000,1000).w,2000);
+});
+test('saved bread binary mask includes black and white and excludes gray outside',()=>{
+ const sandbox={};vm.createContext(sandbox);
+ vm.runInContext(between('function savedRoiRectangle','function clearSavedOriginalRange'),sandbox);
+ assert.equal(sandbox.savedMaskSelected(0,255,'binary'),true);
+ assert.equal(sandbox.savedMaskSelected(255,255,'binary'),true);
+ assert.equal(sandbox.savedMaskSelected(127,255,'binary'),false);
+ assert.equal(sandbox.savedMaskSelected(255,0,'mask'),false);
+ assert.equal(sandbox.savedMaskSelected(255,255,'mask'),true);
+ assert.equal(sandbox.savedMaskSelected(0,255,'mask'),false);
+});
+test('saved original ROI markers and metadata are wired to saved detail only',()=>{
+ const html=fs.readFileSync('index.php','utf8');
+ assert.match(html,/id="savedRoiRect"/);
+ assert.match(html,/id="savedRoiMask"/);
+ assert.match(html,/id="savedOriginalCaption"/);
+ const view=between('window.viewSavedAnalysis=async','$(\'restoreForReanalysis\').onclick');
+ assert.doesNotMatch(view,/処理日時/);
+ assert.match(view,/await showSavedOriginalRange\(s,p,roiData,original\.naturalWidth,original\.naturalHeight,generation\)/);
+});
