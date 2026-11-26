@@ -99,3 +99,22 @@ assert call('delete_samples',{'experiment_id':e2,'sample_ids':[s3]})['deleted_co
 assert call('delete_experiment',{'experiment_id':e2,'expected_treatment_count':1})['deleted_count']==1
 assert not call('experiments')['items']
 print('Deletion integration tests passed: authorization, guards, atomic selection, shared files, related files, revisions and empty parent removal.')
+
+
+# Preset lifecycle: duplicate names do not overwrite, IDs isolate changes, and
+# saved sample analysis conditions are independent of preset records.
+p1=call('save_preset',{'name':'preset A','parameters':{'dpi':600,'min_area_mm2':1}})['id']
+p2=call('save_preset',{'name':'preset B','parameters':{'dpi':300,'min_area_mm2':.15}})['id']
+call('save_preset',{'name':'preset A','parameters':{'dpi':100}},409)
+call('save_preset',{'name':'食パン（研究標準）','parameters':{'dpi':100}},409)
+call('save_preset',{'name':'bad','parameters':[]},422)
+assert call('update_preset',{'preset_id':p1,'parameters':{'dpi':600,'min_area_mm2':.5}})['id']==p1
+entries={int(p['id']):json.loads(p['parameter_json']) for p in call('presets')['items']}
+assert entries[p1]=={'dpi':600,'min_area_mm2':.5}
+assert entries[p2]=={'dpi':300,'min_area_mm2':.15}
+call('delete_preset',status=405)
+assert call('delete_preset',{'preset_id':p1})['deleted_id']==p1
+call('update_preset',{'preset_id':p1,'parameters':{'dpi':300}},404)
+call('delete_preset',{'preset_id':p1},404)
+assert [int(p['id']) for p in call('presets')['items']]==[p2]
+print('Preset integration checks passed.')
