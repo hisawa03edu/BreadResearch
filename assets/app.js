@@ -18,6 +18,7 @@ let filteredSamples=[];
 let selectedSampleIds=new Set();
 let selectedExperimentId=null;
 let currentStats=null;
+let deletionRunning=false,managementLoadGeneration=0,samplesLoadGeneration=0,statsGeneration=0;
 let breadMaskStateCanvas=null,breadMaskOriginalDataUrl=null,breadMaskPrepared=null,breadMaskEditMode='add';
 let engineReady=false;
 let activeAnalysisController=null;
@@ -247,13 +248,89 @@ async function loadDashboard(){try{const d=await api('dashboard'),t=d.totals;
  $('dashboardExperiments').innerHTML='<tr><th>研究テーマ</th><th>サンプル数</th><th>平均空洞率</th><th>最終処理</th></tr>'+d.experiments.map(x=>`<tr><td>${esc(x.name)}</td><td>${x.sample_count}</td><td>${Number(x.mean_porosity||0).toFixed(2)}</td><td>${esc(x.last_processed_at||'')}</td></tr>`).join('');
  $('dashboardRecent').innerHTML='<tr><th>試験</th><th>試験区</th><th>サンプル</th><th>空洞率</th><th>日時</th></tr>'+d.recent.map(x=>`<tr><td>${esc(x.experiment_name)}</td><td>${esc(x.treatment_name)}</td><td>${esc(x.sample_code)}</td><td>${Number(x.porosity_percent).toFixed(2)}</td><td>${esc(x.processed_at)}</td></tr>`).join('');
 }catch(e){console.error(e)}}
-async function refreshExperiments(){experiments=(await api('experiments')).items;const o=experiments.map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('');
- ['treatExperiment','analysisExperiment','dataExperiment','statsExperiment'].forEach(id=>$(id).innerHTML=o);
- $('experimentTable').innerHTML='<tr><th>試験名</th><th>研究者</th><th>開始日</th><th>試験区数</th><th>サンプル数</th></tr>'+experiments.map(e=>`<tr><td>${esc(e.name)}</td><td>${esc(e.researcher)}</td><td>${esc(e.start_date)}</td><td>${e.treatment_count}</td><td>${e.sample_count}</td></tr>`).join('');
- await refreshTreatments();}
-async function refreshTreatments(){if(!$('analysisExperiment').value)return;const a=(await api('treatments',{query:`&experiment_id=${$('analysisExperiment').value}`})).items;
- $('analysisTreatment').innerHTML=a.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('');}
+function replaceOptions(select,items){
+ const previous=select.value;
+ select.innerHTML=items.map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('');
+ if(items.some(e=>String(e.id)===previous))select.value=previous;
+}
+async function refreshExperiments(){
+ experiments=(await api('experiments')).items;
+ ['treatExperiment','analysisExperiment','dataExperiment','statsExperiment'].forEach(id=>replaceOptions($(id),experiments));
+ $('experimentTable').innerHTML='<tr><th>試験名</th><th>研究者</th><th>開始日</th><th>試験区数</th><th>サンプル数</th><th>操作</th></tr>'+
+ (experiments.length?experiments.map(e=>`<tr><td>${esc(e.name)}</td><td>${esc(e.researcher)}</td><td>${esc(e.start_date)}</td><td>${e.treatment_count}</td><td>${e.sample_count}</td><td><button type="button" class="danger" data-delete-experiment="${e.id}" ${Number(e.sample_count)>0?'disabled title="解析データを先に削除してください"':''}>削除</button></td></tr>`).join(''):'<tr><td colspan="6">登録済みの試験はありません。</td></tr>');
+ $('experimentTable').querySelectorAll('[data-delete-experiment]').forEach(btn=>btn.onclick=()=>deleteExperiment(Number(btn.dataset.deleteExperiment)));
+ $('createTreatment').disabled=!experiments.length;
+ await Promise.all([refreshTreatments(),refreshManagedTreatments()]);
+}
+async function refreshTreatments(){
+ const eid=$('analysisExperiment').value;
+ if(!eid){$('analysisTreatment').innerHTML='';return;}
+ const a=(await api('treatments',{query:`&experiment_id=${eid}`})).items;
+ if($('analysisExperiment').value===eid)replaceOptions($('analysisTreatment'),a);
+}
+async function refreshManagedTreatments(){
+ const generation=++managementLoadGeneration,eid=$('treatExperiment').value,table=$('treatmentTable');
+ const header='<tr><th>試験区名</th><th>表示順</th><th>説明</th><th>サンプル数</th><th>操作</th></tr>';
+ table.innerHTML=header+'<tr><td colspan="5">'+(eid?'読み込み中…':'試験を登録してください。')+'</td></tr>';
+ if(!eid)return;
+ const items=(await api('treatments',{query:`&experiment_id=${eid}`})).items;
+ if(generation!==managementLoadGeneration||$('treatExperiment').value!==eid)return;
+ table.innerHTML=header+(items.length?items.map(t=>`<tr><td>${esc(t.name)}</td><td>${esc(t.display_order)}</td><td>${esc(t.description)}</td><td>${t.sample_count}</td><td><button type="button" class="danger" data-delete-treatment="${t.id}" ${Number(t.sample_count)>0?'disabled title="解析データを先に削除または移動してください"':''}>削除</button></td></tr>`).join(''):'<tr><td colspan="5">登録済みの試験区はありません。</td></tr>');
+ table.querySelectorAll('[data-delete-treatment]').forEach(btn=>btn.onclick=()=>deleteTreatment(items.find(t=>String(t.id)===btn.dataset.deleteTreatment)));
+}
 $('analysisExperiment').onchange=refreshTreatments;
+$('treatExperiment').onchange=()=>refreshManagedTreatments().catch(e=>alert(e.message));
+function canDelete(){
+ if(deletionRunning)return false;
+ if(analysisRunning||manualSaving){alert('画像解析または手動補正の保存が完了してから削除してください。');return false;}
+ return true;
+}
+function invalidateStats(){
+ ++statsGeneration;currentStats=null;clearTimeout(window.breadStatsResizeTimer);
+ ['summaryTable','testTable','pairTable'].forEach(id=>$(id).innerHTML='');
+ const canvas=$('statsChart');canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
+ $('statsStatus').textContent='データが変更されました。必要に応じて再集計してください。';
+}
+async function refreshAfterDeletion(){
+ invalidateStats();
+ $('holesTable').innerHTML='';
+ $('selectedSampleEditPanel').classList.add('hidden');
+ if(savedAnalysis){$('savedAnalysisPanel').classList.add('hidden');savedAnalysis=null;}
+ await refreshExperiments();
+ await Promise.all([loadSamples(),loadDashboard()]);
+}
+async function performDeletion(action,body,message,ids=[]){
+ if(!canDelete())return;
+ deletionRunning=true;
+ let result;
+ try{
+  result=await api(action,{method:'POST',body});
+  if(ids.length){
+   const deleted=new Set(ids.map(Number));
+   ids.forEach(id=>selectedSampleIds.delete(Number(id)));
+   if(deleted.has(Number(manualEdit.sampleId)))clearManualEditor();
+   if(rerunMeta&&deleted.has(Number(rerunMeta.sourceId||rerunMeta.parent))){rerunFile=null;rerunMeta=null;resetRoiPreview();resetBreadMask();}
+   $('analysisResults').querySelectorAll('[data-analysis-sample-id]').forEach(card=>{if(deleted.has(Number(card.dataset.analysisSampleId)))card.remove();});
+  }
+  try{await refreshAfterDeletion();}catch(e){alert('削除は完了しましたが、画面の更新に失敗しました。再読み込みしてください。');}
+  alert(message(result)+(result.warning?'\n'+result.warning:''));
+ }catch(e){alert('削除できませんでした：'+e.message);}
+ finally{deletionRunning=false;updateSelectedSampleCount();}
+}
+async function deleteExperiment(id){
+ if(!canDelete())return;
+ const e=experiments.find(item=>Number(item.id)===id);
+ if(!e||Number(e.sample_count)>0)return alert('解析データを先に削除してください。');
+ const count=Number(e.treatment_count);
+ if(!confirm(`試験「${e.name}」を削除しますか？\n所属する空の試験区 ${count} 件も削除されます。\n元に戻すことはできません。`))return;
+ await performDeletion('delete_experiment',{experiment_id:id,expected_treatment_count:count},r=>`試験を削除しました（試験区 ${r.deleted_treatment_count} 件）。`);
+}
+async function deleteTreatment(t){
+ if(!t||!canDelete())return;
+ if(Number(t.sample_count)>0)return alert('解析データを先に削除または移動してください。');
+ if(!confirm(`試験区「${t.name}」を削除しますか？\n元に戻すことはできません。`))return;
+ await performDeletion('delete_treatment',{treatment_id:Number(t.id)},()=> '試験区を削除しました。');
+}
 $('createExperiment').onclick=async()=>{try{await api('create_experiment',{method:'POST',body:{name:$('expName').value,objective:$('expObjective').value,researcher:$('expResearcher').value,institution:$('expInstitution').value,start_date:$('expStartDate').value,notes:$('expNotes').value}});await refreshExperiments();alert('登録しました')}catch(e){alert(e.message)}};
 $('createTreatment').onclick=async()=>{try{await api('create_treatment',{method:'POST',body:{experiment_id:$('treatExperiment').value,name:$('treatName').value,display_order:num('treatOrder'),description:$('treatDescription').value}});await refreshTreatments();alert('登録しました')}catch(e){alert(e.message)}};
 async function loadPresets(){const a=(await api('presets')).items;a.forEach(x=>serverPresets[x.name]=JSON.parse(x.parameter_json));const names=[...Object.keys(builtinPresets),...Object.keys(serverPresets)];$('presetSelect').innerHTML=names.map(n=>`<option>${esc(n)}</option>`).join('');}
@@ -429,7 +506,7 @@ $('clearRoi').onclick = () => {
   }
 };
 $('runAnalysis').onclick=async()=>{
- if(analysisRunning||manualSaving)return;
+ if(analysisRunning||manualSaving||deletionRunning)return;
  let files=[...$('imageFiles').files];if(!files.length&&rerunFile)files=[rerunFile];
  if(!files.length)return alert('画像を選択してください');
  if(!$('analysisTreatment').value)return alert('試験区を選択してください');
@@ -487,6 +564,7 @@ $('runAnalysis').onclick=async()=>{
     ${Object.keys(otherIntermediateUrls).length?`<details><summary>解析途中画像</summary><div class="intermediate-grid">${Object.entries(otherIntermediateUrls).map(([k,u])=>`<figure><img src="${u}"><figcaption>${esc(intermediateLabel(k))}</figcaption></figure>`).join('')}</div></details>`:''}
     <p><button type="button" class="open-current-manual">この解析画像を手動補正する</button></p></div>`);
    const target={...lastSaved};
+   $('analysisResults').lastElementChild.dataset.analysisSampleId=String(target.id);
    $('analysisResults').lastElementChild.querySelector('.open-current-manual').onclick=()=>openManualEditor(target.id,target.resultUrl,target.baseUrl,target.label);
   }catch(e){
    if(e.name==='AbortError'){
@@ -590,7 +668,7 @@ function renderSamplesTable(){
    const arrow=dataTableState.sortKey===c.key?(dataTableState.sortDir==='asc'?' ▲':' ▼'):'';
    return `<th class="sortable" data-sort="${c.key}">${esc(c.label)}${arrow}</th>`;
  }).join('')}<th>操作</th></tr></thead><tbody>`+
- rows.map(s=>{const thumbs=showThumbnails?sampleThumbnailCell(s.original_image_path,'元画像',s.id)+sampleThumbnailCell(s.latest_corrected_result_path||s.result_image_path,'解析結果',s.id):'';return `<tr class="${selectedSampleIds.has(Number(s.id))?'selected-row':''}"><td class="select-cell"><input class="sample-select" type="checkbox" data-sample-id="${s.id}" ${selectedSampleIds.has(Number(s.id))?'checked':''}></td>${thumbs}${cols.map(c=>`<td>${formatCell(s[c.key],c.type)}</td>`).join('')}<td class="action-cell"><button onclick="viewSavedAnalysis(${s.id})">画像・結果</button> <button onclick="showHoles(${s.id})">空洞詳細</button> <button onclick="deleteSample(${s.id})">削除</button></td></tr>`;}).join('')+'</tbody>';
+ rows.map(s=>{const thumbs=showThumbnails?sampleThumbnailCell(s.original_image_path,'元画像',s.id)+sampleThumbnailCell(s.latest_corrected_result_path||s.result_image_path,'解析結果',s.id):'';return `<tr class="${selectedSampleIds.has(Number(s.id))?'selected-row':''}"><td class="select-cell"><input class="sample-select" type="checkbox" data-sample-id="${s.id}" ${selectedSampleIds.has(Number(s.id))?'checked':''}></td>${thumbs}${cols.map(c=>`<td>${formatCell(s[c.key],c.type)}</td>`).join('')}<td class="action-cell"><button onclick="viewSavedAnalysis(${s.id})">画像・結果</button> <button onclick="showHoles(${s.id})">空洞詳細</button> <button type="button" class="danger" onclick="deleteSample(${s.id})">削除</button></td></tr>`;}).join('')+'</tbody>';
  $('samplesTable').querySelectorAll('th.sortable').forEach(th=>th.onclick=()=>{
    const key=th.dataset.sort;if(dataTableState.sortKey===key)dataTableState.sortDir=dataTableState.sortDir==='asc'?'desc':'asc';
    else{dataTableState.sortKey=key;dataTableState.sortDir='asc';}
@@ -619,11 +697,16 @@ function renderSamplesTable(){
  saveDataTableState();
 }
 async function loadSamples(){
- if(!$('dataExperiment').value)return;
+ const generation=++samplesLoadGeneration;
+ if(!$('dataExperiment').value){
+  selectedExperimentId=null;selectedSampleIds.clear();currentSamples=[];dataTableState.page=1;renderSamplesTable();return;
+ }
  const experimentId=Number($('dataExperiment').value);
  if(selectedExperimentId!==null&&selectedExperimentId!==experimentId)selectedSampleIds.clear();
  selectedExperimentId=experimentId;
- currentSamples=(await api('samples',{query:`&experiment_id=${$('dataExperiment').value}`})).items;
+ const items=(await api('samples',{query:`&experiment_id=${experimentId}`})).items;
+ if(generation!==samplesLoadGeneration||Number($('dataExperiment').value)!==experimentId)return;
+ currentSamples=items;
  const validIds=new Set(currentSamples.map(s=>Number(s.id)));
  selectedSampleIds=new Set([...selectedSampleIds].filter(id=>validIds.has(id)));
  dataTableState.page=1;renderSamplesTable();
@@ -644,6 +727,7 @@ function updateSelectedSampleCount(){
  $('selectedSampleCount').textContent=`選択データ：${count}件`;
  $('analyzeSelectedSamples').disabled=count===0;
  $('editSelectedSamples').disabled=count===0;
+ $('deleteSelectedSamples').disabled=count===0||deletionRunning;
  const selectedOption=$('statsSource').querySelector('option[value="selected"]');
  if(selectedOption)selectedOption.textContent=`データ一覧で選択したデータ（${count}件）`;
 }
@@ -778,7 +862,7 @@ window.viewSavedAnalysis=async id=>{
 };
 $('closeSavedAnalysis').onclick=()=>{$('savedAnalysisPanel').classList.add('hidden');savedAnalysis=null;};
 $('restoreForReanalysis').onclick=async()=>{
- if(!savedAnalysis||analysisRunning||manualSaving)return;
+ if(!savedAnalysis||analysisRunning||manualSaving||deletionRunning)return;
  if(manualEdit.actions.length&&!confirm('未保存の手動補正を破棄しますか？'))return;
  const sample=savedAnalysis;
  analysisRunning=true;$('runAnalysis').disabled=true;$('imageFiles').disabled=true;
@@ -803,7 +887,7 @@ $('restoreForReanalysis').onclick=async()=>{
   const blob=await r.blob();
   const ext=blob.type==='image/png'?'.png':blob.type==='image/webp'?'.webp':'.jpg';
   rerunFile=new File([blob],`${sample.sample_code}_R${Number(sample.revision_no||1)+1}${ext}`,{type:blob.type||'image/jpeg'});
-  rerunMeta={parent:sample.parent_sample_id||sample.id,revision:Number(sample.revision_no||1)+1};
+  rerunMeta={parent:sample.parent_sample_id||sample.id,sourceId:sample.id,revision:Number(sample.revision_no||1)+1};
   await loadRoiPreview(rerunFile,p.analysis_scope==='bread'?null:restoredRoi);
   if(p.analysis_scope==='bread'&&sample.bread_mask_path){
     const image=await loadImage(rerunFile),prepared=prepareBreadImage(image,p);
@@ -822,7 +906,21 @@ $('openSavedManualEditor').onclick=()=>{
 };
 
 window.showHoles=async id=>{const a=(await api('holes',{query:`&sample_id=${id}`})).items,c=['hole_number','area_mm2','eq_diameter_mm','circularity','aspect_ratio','size_class'];$('holesTable').innerHTML='<tr>'+c.map(x=>`<th>${x}</th>`).join('')+'</tr>'+a.map(v=>`<tr>${c.map(x=>`<td>${esc(v[x])}</td>`).join('')}</tr>`).join('')};
-window.deleteSample=async id=>{if(confirm('削除しますか？')){await api('delete_sample',{method:'POST',body:{sample_id:id}});selectedSampleIds.delete(Number(id));await loadSamples()}};
+async function confirmSampleDeletion(ids){
+ if(!canDelete())return;
+ const unique=[...new Set(ids.map(Number))];
+ const eid=Number($('dataExperiment').value);
+ const rows=currentSamples.filter(s=>unique.includes(Number(s.id)));
+ if(!unique.length||!eid||rows.length!==unique.length)return alert('削除対象を選び直してください。');
+ if(unique.length>500)return alert('一度に削除できるデータは500件までです。');
+ const names=rows.slice(0,8).map(s=>`・${s.treatment_name} / ${s.sample_code}（改訂 ${s.revision_no}）`).join('\n');
+ const extra=rows.length>8?`\nほか ${rows.length-8} 件`:'';
+ if(!confirm(`${unique.length}件の解析データを削除しますか？\n${names}${extra}\n\n対象の空洞詳細・画像・手動補正も削除します。元に戻せません。`))return;
+ if(unique.length>1&&!confirm(`最終確認：選択した ${unique.length} 件を完全に削除しますか？`))return;
+ await performDeletion('delete_samples',{experiment_id:eid,sample_ids:unique},r=>`${r.deleted_count}件の解析データを削除しました。`,unique);
+}
+window.deleteSample=id=>confirmSampleDeletion([id]);
+$('deleteSelectedSamples').onclick=()=>confirmSampleDeletion([...selectedSampleIds]);
 
 function exportVisibleRows(){
  const cols=getVisibleSampleColumns();
@@ -934,8 +1032,11 @@ async function calculateStatistics(){
  if(source==='selected'&&(!selectedSampleIds.size||Number(selectedExperimentId)!==experimentId))return alert('選択したデータは別の試験に属しているか、選択されていません。データ一覧から選び直してください。');
  $('statsStatus').textContent='統計量と検定結果を計算しています…';
  try{
-   currentStats=await api('statistics',{method:'POST',body:{experiment_id:experimentId,metric:$('statsMetric').value,
+   const generation=++statsGeneration;
+   const result=await api('statistics',{method:'POST',body:{experiment_id:experimentId,metric:$('statsMetric').value,
      alpha:Number($('alpha').value)||0.05,source,sample_ids:source==='selected'?[...selectedSampleIds]:[]}});
+   if(generation!==statsGeneration)return;
+   currentStats=result;
    const sourceText=currentStats.source==='selected'?'データ一覧で選択したデータ':currentStats.source==='all'?'試験内の全履歴':'試験内の最新版';
    $('statsStatus').textContent=`${sourceText}：${currentStats.sample_count}件、${currentStats.group_count}試験区を集計しました。`;
    renderStatsTables(currentStats);renderStatsChart(currentStats);
@@ -943,7 +1044,7 @@ async function calculateStatistics(){
 }
 $('calculateStats').onclick=()=>calculateStatistics().catch(error=>alert(error.message));
 $('showSignificance').onchange=()=>{if(currentStats){renderStatsTables(currentStats);renderStatsChart(currentStats);}};
-window.addEventListener('resize',()=>{if(currentStats){clearTimeout(window.breadStatsResizeTimer);window.breadStatsResizeTimer=setTimeout(()=>renderStatsChart(currentStats),150);}});
+window.addEventListener('resize',()=>{if(currentStats){clearTimeout(window.breadStatsResizeTimer);window.breadStatsResizeTimer=setTimeout(()=>{if(currentStats)renderStatsChart(currentStats);},150);}});
 $('exportStatsXlsx').onclick=()=>{
  if(!currentStats)return alert('先に集計・検定を実行してください。');
  if(typeof XLSX==='undefined')return alert('Excel出力ライブラリを読み込めません。');
@@ -977,7 +1078,7 @@ function clearManualEditor(){
  $('manualEditStatus').textContent='';$('manualEditTarget').textContent='';
 }
 window.openManualEditor=async(sampleId,imagePath,baseUrl=null,label='',scroll=true,fromAnalysis=false)=>{
- if(manualSaving||(analysisRunning&&!fromAnalysis))return;
+ if(manualSaving||deletionRunning||(analysisRunning&&!fromAnalysis))return;
  if(manualEdit.actions.length&&!confirm('未保存の手動補正を破棄しますか？'))return;
  clearManualEditor();
  const generation=manualEditorGeneration;
@@ -1016,7 +1117,7 @@ $('resetManualCorrection').onclick=()=>{
  const c=$('editCanvas');c.getContext('2d').drawImage(manualEdit.baseImage,0,0);manualEdit.actions=[];$('manualEditStatus').textContent='補正をリセットしました。';
 };
 $('saveManualCorrection').onclick=async()=>{
- if(!manualEdit.sampleId||manualSaving||analysisRunning)return;
+ if(!manualEdit.sampleId||manualSaving||analysisRunning||deletionRunning)return;
  if(!manualEdit.actions.length)return alert('補正操作がありません。');
  manualSaving=true;$('saveManualCorrection').disabled=true;
  try{
