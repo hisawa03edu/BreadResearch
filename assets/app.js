@@ -753,7 +753,7 @@ async function openSampleEditor(ids){
  if(!$('selectedSampleEditPanel').classList.contains('hidden')&&!confirm('編集中の内容を破棄して別のデータを開きますか？'))return;
  closeSampleEditor();const generation=sampleEditGeneration;
  try{
-  const treatments=(await api('treatments',{query:&experiment_id=${eid} })).items;
+  const treatments=(await api('treatments',{query:`&experiment_id=${eid}`})).items;
   if(generation!==sampleEditGeneration||Number($('dataExperiment').value)!==eid)return;
   if(!treatments.length)return alert('選択できる試験区がありません。');
   const options=sample=>treatments.map(t=>`<option value="${t.id}" ${Number(t.id)===Number(sample.treatment_id)?'selected':''}>${esc(t.name)}</option>`).join('');
