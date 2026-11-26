@@ -195,11 +195,11 @@ if (file_exists($configFile)) {
       <button id="applyRoiNumbers">数値を反映</button>
       <button id="clearRoi">ROIを解除</button>
     </div>
-    <div id="roiInfo" class="notice">ROI未指定</div>
+    <div id="roiInfo" class="notice">画像を選択するとROIを表示します。</div>
     <div class="roi-wrap"><canvas id="roiCanvas"></canvas></div>
     <p class="small-note">
       黄色い矩形の内側をドラッグすると、W・Hを変えずに位置だけ移動します。
-      W・HまたはX・Yを変更した場合は「数値を反映」を押してください。
+      W・HまたはX・Yを変更した場合は「数値を反映」を押してください。新しい画像を選択するとROIは中央へ再設定します。ROIを使う一括解析では同じ縦横サイズの画像を選択してください。
     </p>
     <div id="breadMaskControls" class="bread-mask-controls hidden">
       <button id="detectBreadMask" class="primary">パン輪郭を自動検出</button>
@@ -233,7 +233,9 @@ if (file_exists($configFile)) {
       <button id="saveManualCorrection" class="primary">手動補正を保存</button>
       <button id="resetManualCorrection">補正をリセット</button>
     </div>
-    <canvas id="editCanvas"></canvas>
+    <p id="manualEditTarget" class="notice"></p>
+    <label class="result-opacity-control">検出結果の濃度 <input id="manualEditOpacity" type="range" min="0" max="100" value="100"><output id="manualEditOpacityValue">100%</output></label>
+    <div style="position:relative;width:fit-content;max-width:100%;line-height:0"><canvas id="manualBaseCanvas" style="display:block;max-width:100%;height:auto"></canvas><canvas id="editCanvas" style="position:absolute;inset:0;display:block;width:100%;height:100%;cursor:crosshair;background:transparent"></canvas></div>
     <div id="manualEditStatus"></div>
   </div>
 </section>
@@ -379,6 +381,6 @@ if (file_exists($configFile)) {
 
 <canvas id="workCanvas" class="hidden"></canvas>
 <script defer src="assets/vendor/xlsx.full.min.js"></script>
-<script defer src="assets/app.js?v=10.6.0-view4"></script>
+<script defer src="assets/app.js?v=10.6.0-roi-sync1"></script>
 </body>
 </html>
